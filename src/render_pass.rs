@@ -4,7 +4,6 @@ use vulkano::framebuffer::{
 };
 use vulkano::image::ImageLayout;
 
-
 use vulkano::format::{ClearValue, Format};
 
 #[derive(Copy, Clone)]
