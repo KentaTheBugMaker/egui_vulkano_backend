@@ -16,7 +16,8 @@ use vulkano::descriptor::PipelineLayoutAbstract;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::format::Format::R8G8B8A8Srgb;
-use egui::{Color32, TextureId};
+use epi::egui::{Texture, TextureId, Color32};
+
 
 #[cfg(test)]
 mod tests {
@@ -56,36 +57,7 @@ impl EguiVulkanoRenderPass {
     ) -> Self {
         let fs = fs::Shader::load(device.clone()).unwrap();
         let vs = vs::Shader::load(device.clone()).unwrap();
-        /*
-                vulkano::single_pass_renderpass!(
-                    device.clone(),
-                    attachments: {
-                        // `color` is a custom name we give to the first and only attachment.
-                        color: {
-                            // `load: Clear` means that we ask the GPU to clear the content of this
-                            // attachment at the start of the drawing.
-                            load: Clear,
-                            // `store: Store` means that we ask the GPU to store the output of the draw
-                            // in the actual image. We could also ask it to discard the result.
-                            store: Store,
-                            // `format: <ty>` indicates the type of the format of the image. This has to
-                            // be one of the types of the `vulkano::format` module (or alternatively one
-                            // of your structs that implements the `FormatDesc` trait). Here we use the
-                            // same format as the swapchain.
-                            format: swapchain.format(),
-                            // TODO:
-                            samples: 1,
-                        }
-                    },
-                    pass: {
-                        // We use the attachment named `color` as the one and only color attachment.
-                        color: [color],
-                        // No depth-stencil attachment is indicated with empty brackets.
-                        depth_stencil: {}
-                    }
-                )
-                    .unwrap();
-        */
+
         let render_pass = Arc::new(
             EguiRenderPassDesc {
                 color: (render_target_format, 0),
@@ -130,7 +102,7 @@ impl EguiVulkanoRenderPass {
             queue,
         }
     }
-    pub fn upload_egui_texture(&mut self, texture: &egui::Texture) {
+    pub fn upload_egui_texture(&mut self, texture: &Texture) {
         //no change
         if self.egui_texture_version == Some(texture.version) {
             return;
@@ -151,19 +123,19 @@ impl EguiVulkanoRenderPass {
         self.egui_texture = Some(image.0);
         self.egui_texture_version = Some(texture.version);
     }
-    fn alloc_user_texture(&mut self) -> egui::TextureId {
+    fn alloc_user_texture(&mut self) -> TextureId {
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
                 *tex = Some(Default::default());
-                return egui::TextureId::User(i as u64);
+                return TextureId::User(i as u64);
             }
         }
-        let id = egui::TextureId::User(self.user_textures.len() as u64);
+        let id = TextureId::User(self.user_textures.len() as u64);
         self.user_textures.push(Some(Default::default()));
         id
     }
-    fn free_user_texture(&mut self, id: egui::TextureId) {
-        if let egui::TextureId::User(id) = id {
+    fn free_user_texture(&mut self, id: TextureId) {
+        if let TextureId::User(id) = id {
             self.user_textures
                 .get_mut(id as usize)
                 .and_then(|option| option.take());
@@ -200,12 +172,12 @@ impl EguiVulkanoRenderPass {
     }
     pub fn set_user_texture(
         &mut self,
-        id: egui::TextureId,
+        id: TextureId,
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
         //pre alloc area
-        if let egui::TextureId::User(id) = id {
+        if let TextureId::User(id) = id {
             let mut pixels = Vec::with_capacity(size.0 * size.1 * 4);
             //unpack pixels
             for pixel in srgba_pixels {

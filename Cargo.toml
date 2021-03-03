@@ -10,5 +10,4 @@ license="MIT or Apache 2.0"
 [dependencies]
 vulkano = "0.20.0"
 vulkano-shaders = "0.20.0"
-egui = "0.10.0"
-epi="0.10.0"
+epi = "0.10.0"
