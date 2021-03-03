@@ -7,9 +7,11 @@ use crate::render_pass::EguiRenderPassDesc;
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::sync::Arc;
-use vulkano::buffer::CpuAccessibleBuffer;
+use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool};
 use vulkano::command_buffer::{CommandBuffer, DynamicState, SubpassContents};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::descriptor::descriptor_set::{
+    PersistentDescriptorSet, PersistentDescriptorSetImg, StdDescriptorPoolAlloc,
+};
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
@@ -51,18 +53,28 @@ type Pipeline = GraphicsPipeline<
     Box<dyn PipelineLayoutAbstract + Send + Sync>,
     Arc<RenderPass<EguiRenderPassDesc>>,
 >;
+type UniformBinding = ([f32; 2], Sampler);
 pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,
     vertex_buffers: Vec<Arc<CpuAccessibleBuffer<[EguiVulkanoVertex]>>>,
     index_buffers: Vec<Arc<CpuAccessibleBuffer<[u32]>>>,
-    egui_texture: Option<Arc<vulkano::image::ImmutableImage<vulkano::format::R8G8B8A8Srgb>>>,
+    egui_texture_descriptor_set: Option<
+        Arc<
+            PersistentDescriptorSet<
+                ((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>),
+                StdDescriptorPoolAlloc,
+            >,
+        >,
+    >,
     egui_texture_version: Option<u64>,
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     sampler: Arc<Sampler>,
-    texture_bindings: Vec<Arc<dyn DescriptorSet>>,
+    uniform_buffer_fs: Arc<CpuBufferPool<Sampler>>,
+    uniform_buffer_vs: Arc<CpuBufferPool<vs::ty::UniformBuffer>>,
 }
+
 impl EguiVulkanoRenderPass {
     pub fn new(
         device: Arc<Device>,
@@ -120,17 +132,21 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
+        let uniform_buffer_fs = Arc::new(CpuBufferPool::uniform_buffer(device.clone()));
+        let uniform_buffer_vs = Arc::new(CpuBufferPool::uniform_buffer(device.clone()));
         Self {
             pipeline,
             vertex_buffers: vec![],
             index_buffers: vec![],
-            egui_texture: None,
+            egui_texture_descriptor_set: None,
             egui_texture_version: None,
             user_textures: vec![],
             device,
             queue,
             sampler,
-            texture_bindings: vec![],
+
+            uniform_buffer_fs,
+            uniform_buffer_vs,
         }
     }
     pub fn execute(
@@ -186,49 +202,53 @@ impl EguiVulkanoRenderPass {
             .zip(self.index_buffers.iter())
         {
             let texture_id = mesh.texture_id;
-            // Transform clip rect to physical pixels.
-            let clip_min_x = scale_factor * clip_rect.min.x;
-            let clip_min_y = scale_factor * clip_rect.min.y;
-            let clip_max_x = scale_factor * clip_rect.max.x;
-            let clip_max_y = scale_factor * clip_rect.max.y;
+            let texture_descriptor = self.get_descriptor(texture_id);
+            //emit valid texturing
+            if let Some(texture_desc_set) = texture_descriptor {
+                // Transform clip rect to physical pixels.
+                let clip_min_x = scale_factor * clip_rect.min.x;
+                let clip_min_y = scale_factor * clip_rect.min.y;
+                let clip_max_x = scale_factor * clip_rect.max.x;
+                let clip_max_y = scale_factor * clip_rect.max.y;
 
-            // Make sure clip rect can fit within an `u32`.
-            let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
-            let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
-            let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
-            let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
+                // Make sure clip rect can fit within an `u32`.
+                let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
+                let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
+                let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
+                let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
 
-            let clip_min_x = clip_min_x.round() as u32;
-            let clip_min_y = clip_min_y.round() as u32;
-            let clip_max_x = clip_max_x.round() as u32;
-            let clip_max_y = clip_max_y.round() as u32;
+                let clip_min_x = clip_min_x.round() as u32;
+                let clip_min_y = clip_min_y.round() as u32;
+                let clip_max_x = clip_max_x.round() as u32;
+                let clip_max_y = clip_max_y.round() as u32;
 
-            let width = (clip_max_x - clip_min_x).max(1);
-            let height = (clip_max_y - clip_min_y).max(1);
-            {
-                // clip scissor rectangle to target size
-                let x = clip_min_x.min(physical_width);
-                let y = clip_min_y.min(physical_height);
-                let width = width.min(physical_width - x);
-                let height = height.min(physical_height - y);
+                let width = (clip_max_x - clip_min_x).max(1);
+                let height = (clip_max_y - clip_min_y).max(1);
+                {
+                    // clip scissor rectangle to target size
+                    let x = clip_min_x.min(physical_width);
+                    let y = clip_min_y.min(physical_height);
+                    let width = width.min(physical_width - x);
+                    let height = height.min(physical_height - y);
 
-                // skip rendering with zero-sized clip areas
-                if width == 0 || height == 0 {
-                    continue;
+                    // skip rendering with zero-sized clip areas
+                    if width == 0 || height == 0 {
+                        continue;
+                    }
+                    dynamic.scissors = Some(vec![Scissor {
+                        origin: [x as i32, y as i32],
+                        dimensions: [width, height],
+                    }]);
+                    pass.draw_indexed(
+                        self.pipeline.clone(),
+                        &dynamic,
+                        vertex_buffer.clone(),
+                        index_buffer.clone(),
+                        (texture_desc_set),
+                        (),
+                    )
+                    .unwrap();
                 }
-                dynamic.scissors = Some(vec![Scissor {
-                    origin: [x as i32, y as i32],
-                    dimensions: [width, height],
-                }]);
-                pass.draw_indexed(
-                    self.pipeline.clone(),
-                    &dynamic,
-                    vertex_buffer.clone(),
-                    index_buffer.clone(),
-                    (),
-                    (),
-                )
-                .unwrap();
             }
         }
         pass.end_render_pass().unwrap();
@@ -257,7 +277,10 @@ impl EguiVulkanoRenderPass {
         )
         .unwrap();
         image.1.flush().unwrap();
-        self.egui_texture = Some(image.0);
+        let image_view = image.0 as Arc<dyn ImageViewAccess>;
+        let pipeline = self.pipeline.clone();
+        self.egui_texture_descriptor_set =
+            Some(Self::create_texture_binding_from_view(pipeline, image_view));
         self.egui_texture_version = Some(texture.version);
     }
     fn alloc_user_texture(&mut self) -> TextureId {
@@ -279,10 +302,11 @@ impl EguiVulkanoRenderPass {
         }
     }
     pub fn upload_pending_textures(&mut self) {
+        let pipeline = self.pipeline.clone();
         for user_texture in &mut self.user_textures {
             if let Some(user_texture) = user_texture {
                 //when uploaded image is none
-                if user_texture.vulkano_image_view.is_none() {
+                if user_texture.descriptor_set.is_none() {
                     //get data
                     let pixels = std::mem::take(&mut user_texture.pixels);
                     //skip upload invalid texture and avoid clash
@@ -302,45 +326,52 @@ impl EguiVulkanoRenderPass {
                     .unwrap();
                     future.flush().unwrap();
                     let image_view = image as Arc<dyn ImageViewAccess>;
-                    user_texture.vulkano_image_view = Some(image_view)
+                    user_texture.descriptor_set = Some(Self::create_texture_binding_from_view(
+                        pipeline.clone(),
+                        image_view,
+                    ));
                 }
             }
         }
     }
-    fn get_texture_view(&self, texture_id: egui::TextureId) -> Arc<dyn ImageViewAccess> {
+
+    fn create_texture_binding_from_view(
+        pipeline: Arc<Pipeline>,
+        image_view: Arc<dyn ImageViewAccess>,
+    ) -> Arc<PersistentDescriptorSet<((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>)>>
+    {
+        Arc::new(
+            PersistentDescriptorSet::start(
+                pipeline.layout().descriptor_set_layout(1).unwrap().clone(),
+            )
+            .add_image(image_view)
+            .unwrap()
+            .build()
+            .unwrap(),
+        )
+    }
+    fn get_descriptor(
+        &self,
+        texture_id: TextureId,
+    ) -> Option<
+        Arc<
+            PersistentDescriptorSet<
+                ((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>),
+                StdDescriptorPoolAlloc,
+            >,
+        >,
+    > {
         if let egui::TextureId::User(id) = texture_id {
             self.user_textures
                 .get(id as usize)
                 .unwrap()
                 .as_ref()
                 .unwrap()
-                .vulkano_image_view
-                .as_ref()
-                .unwrap()
+                .descriptor_set
                 .clone()
         } else {
-            self.egui_texture.as_ref().unwrap().clone() as Arc<dyn ImageViewAccess>
+            self.egui_texture_descriptor_set.clone()
         }
-    }
-    fn create_texture_binding(&mut self, texture_id: egui::TextureId) -> Arc<dyn DescriptorSet> {
-        let texture_view = self.get_texture_view(texture_id);
-        let sampler = self.sampler.clone();
-        let descriptor_set = Arc::new(
-            PersistentDescriptorSet::start(
-                self.pipeline
-                    .layout()
-                    .descriptor_set_layout(0)
-                    .unwrap()
-                    .clone(),
-            )
-            .add_image(texture_view)
-            .unwrap()
-            .add_sampler(sampler)
-            .unwrap()
-            .build()
-            .unwrap(),
-        );
-        descriptor_set as Arc<dyn DescriptorSet>
     }
     pub fn set_user_texture(
         &mut self,
@@ -358,7 +389,7 @@ impl EguiVulkanoRenderPass {
             let texture = UserTexture {
                 pixels,
                 size: [size.0 as u32, size.1 as u32],
-                vulkano_image_view: None,
+                descriptor_set: None,
             };
             self.user_textures.insert(id as usize, Some(texture))
         }
@@ -370,12 +401,15 @@ impl EguiVulkanoRenderPass {
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
             let dimension = image_view.dimensions();
+            let pipeline = self.pipeline.clone();
             self.user_textures.insert(
                 id as usize,
                 Some(UserTexture {
                     pixels: vec![],
                     size: [dimension.width(), dimension.height()],
-                    vulkano_image_view: Some(image_view),
+                    descriptor_set: Some(Self::create_texture_binding_from_view(
+                        pipeline, image_view,
+                    )),
                 }),
             )
         }
@@ -401,7 +435,15 @@ impl epi::TextureAllocator for EguiVulkanoRenderPass {
 struct UserTexture {
     pixels: Vec<u8>,
     size: [u32; 2],
-    vulkano_image_view: Option<Arc<dyn vulkano::image::ImageViewAccess>>,
+
+    descriptor_set: Option<
+        Arc<
+            PersistentDescriptorSet<
+                ((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>),
+                StdDescriptorPoolAlloc,
+            >,
+        >,
+    >,
 }
 mod fs {
     vulkano_shaders::shader! {
