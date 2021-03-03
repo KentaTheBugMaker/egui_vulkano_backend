@@ -13,7 +13,7 @@ pub struct EguiRenderPassDesc {
 }
 
 unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for EguiRenderPassDesc {
-    fn convert_clear_values(&self, x: Vec<ClearValue>) -> Box<dyn Iterator<Item = ClearValue>> {
+    fn convert_clear_values(&self, _x: Vec<ClearValue>) -> Box<dyn Iterator<Item = ClearValue>> {
         unimplemented!()
     }
 }
@@ -43,7 +43,7 @@ unsafe impl RenderPassDesc for EguiRenderPassDesc {
         1
     }
 
-    fn subpass_desc(&self, num: usize) -> Option<PassDescription> {
+    fn subpass_desc(&self, _num: usize) -> Option<PassDescription> {
         unimplemented!()
     }
 
@@ -51,7 +51,7 @@ unsafe impl RenderPassDesc for EguiRenderPassDesc {
         unimplemented!()
     }
 
-    fn dependency_desc(&self, num: usize) -> Option<PassDependencyDescription> {
+    fn dependency_desc(&self, _num: usize) -> Option<PassDependencyDescription> {
         unimplemented!()
     }
 }
