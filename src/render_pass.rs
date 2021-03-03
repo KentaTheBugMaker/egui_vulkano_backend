@@ -1,27 +1,30 @@
-use vulkano::framebuffer::{PassDependencyDescription, PassDescription, StoreOp, LoadOp, AttachmentDescription, RenderPassDesc, RenderPassDescClearValues};
+use vulkano::framebuffer::{
+    AttachmentDescription, LoadOp, PassDependencyDescription, PassDescription, RenderPassDesc,
+    RenderPassDescClearValues, StoreOp,
+};
 use vulkano::image::ImageLayout;
 
+
 use vulkano::format::{ClearValue, Format};
-use vulkano::SafeDeref;
-use std::ops::Deref;
+
 #[derive(Copy, Clone)]
 pub struct EguiRenderPassDesc {
     pub color: (Format, u32),
 }
 
-unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for EguiRenderPassDesc{
-    fn convert_clear_values(&self, x: Vec<ClearValue>) -> Box<dyn Iterator<Item=ClearValue>> {
+unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for EguiRenderPassDesc {
+    fn convert_clear_values(&self, x: Vec<ClearValue>) -> Box<dyn Iterator<Item = ClearValue>> {
         unimplemented!()
     }
 }
-unsafe impl RenderPassDesc for EguiRenderPassDesc{
+unsafe impl RenderPassDesc for EguiRenderPassDesc {
     fn num_attachments(&self) -> usize {
         1
     }
 
     fn attachment_desc(&self, num: usize) -> Option<AttachmentDescription> {
-        if num==0{
-            Some(AttachmentDescription{
+        if num == 0 {
+            Some(AttachmentDescription {
                 format: self.color.0,
                 samples: 1,
                 load: LoadOp::Clear,
@@ -29,9 +32,9 @@ unsafe impl RenderPassDesc for EguiRenderPassDesc{
                 stencil_load: LoadOp::Clear,
                 stencil_store: StoreOp::Store,
                 initial_layout: ImageLayout::ColorAttachmentOptimal,
-                final_layout: ImageLayout::ColorAttachmentOptimal
-            })}
-        else{
+                final_layout: ImageLayout::ColorAttachmentOptimal,
+            })
+        } else {
             None
         }
     }
