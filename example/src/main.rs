@@ -1,15 +1,12 @@
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassContents};
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{ImageUsage, SwapchainImage};
+
+use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
-use vulkano::pipeline::viewport::Viewport;
-use vulkano::pipeline::GraphicsPipeline;
+
 use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
-    SwapchainAcquireFuture, SwapchainCreationError,
+    SwapchainCreationError,
 };
 use vulkano::sync;
 use vulkano::sync::{FlushError, GpuFuture};
@@ -17,9 +14,7 @@ use vulkano::sync::{FlushError, GpuFuture};
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Window, WindowBuilder};
-
-use std::sync::Arc;
+use winit::window::WindowBuilder;
 
 use chrono::Timelike;
 use egui::FontDefinitions;
@@ -27,7 +22,6 @@ use egui_vulkano_backend::ScreenDescriptor;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 use std::time::Instant;
-use vulkano::image::sys::ImageCreationError::UnsupportedDimensions;
 
 enum EguiUserEvent {
     RequestRedraw,
@@ -101,8 +95,11 @@ fn main() {
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),
     )));
-
-    let mut recreate_swapchain = false;
+    let mut screen_descriptor = ScreenDescriptor {
+        physical_width: swapchain.dimensions()[0],
+        physical_height: swapchain.dimensions()[1],
+        scale_factor: swapchain.surface().window().scale_factor() as f32,
+    };
     //init platform
     let mut platform = Platform::new(PlatformDescriptor {
         physical_width: swapchain.surface().window().inner_size().width,
@@ -121,7 +118,7 @@ fn main() {
     let mut demo_app = egui_demo_lib::WrapApp::default();
     let mut previous_frame_time = None;
     let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
-
+    let mut i = 0;
     let start_time = Instant::now();
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -131,25 +128,36 @@ fn main() {
             *control_flow = ControlFlow::Exit;
         }
         Event::WindowEvent {
-            event: WindowEvent::Resized(_),
+            event: WindowEvent::Resized(size),
             ..
         } => {
-            recreate_swapchain = true;
+            screen_descriptor = ScreenDescriptor {
+                physical_width: size.width,
+                physical_height: size.height,
+                scale_factor: swapchain.surface().window().scale_factor() as f32,
+            };
+            let (new_swapchain, new_images) = match swapchain.recreate_with_dimensions(size.into())
+            {
+                Ok(ok) => ok,
+                Err(SwapchainCreationError::UnsupportedDimensions) => return,
+                Err(err) => panic!("failed to recreate swapchain: {:?}", err),
+            };
+            swapchain = new_swapchain;
+            images = new_images;
         }
-        Event::RedrawEventsCleared => {
+        Event::RedrawRequested(..) => {
+            println!("Request redraw {} ", i);
+            i += 1;
             platform.update_time(start_time.elapsed().as_secs_f64());
-            if recreate_swapchain {
-                let dimensions: [u32; 2] = surface.window().inner_size().into();
-                let (new_swapchain, new_images) =
-                    match swapchain.recreate_with_dimensions(dimensions) {
-                        Ok(ok) => ok,
-                        Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                        Err(err) => panic!("failed to recreate swapchain: {:?}", err),
-                    };
-                swapchain = new_swapchain;
-                images = new_images;
-                recreate_swapchain = false;
-            }
+            let (image_num, _, acquire_future) =
+                match swapchain::acquire_next_image(swapchain.clone(), None) {
+                    Ok(r) => r,
+                    Err(AcquireError::OutOfDate) => {
+                        return;
+                    }
+                    Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                };
+
             // Begin to draw the UI frame.
             let egui_start = Instant::now();
             platform.begin_frame();
@@ -174,25 +182,7 @@ fn main() {
             // End the UI frame. We could now handle the output and draw the UI with the backend.
             let (_output, paint_commands) = platform.end_frame();
             let paint_jobs = platform.context().tessellate(paint_commands);
-            let screen_descriptor = ScreenDescriptor {
-                physical_width: swapchain.dimensions()[0],
-                physical_height: swapchain.dimensions()[1],
-                scale_factor: swapchain.surface().window().scale_factor() as f32,
-            };
-            //
-            let (image_num, suboptimal, acquire_future) =
-                match swapchain::acquire_next_image(swapchain.clone(), None) {
-                    Ok(r) => r,
-                    Err(AcquireError::OutOfDate) => {
-                        recreate_swapchain = true;
-                        return;
-                    }
-                    Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                };
 
-            if suboptimal {
-                recreate_swapchain = true;
-            }
             //prepare
             egui_render_pass.upload_egui_texture(&platform.context().texture());
             egui_render_pass.upload_pending_textures();
@@ -221,7 +211,6 @@ fn main() {
                     previous_frame_end = Some(future.boxed());
                 }
                 Err(FlushError::OutOfDate) => {
-                    recreate_swapchain = true;
                     previous_frame_end = Some(sync::now(device.clone()).boxed());
                 }
                 Err(e) => {
@@ -230,41 +219,13 @@ fn main() {
                 }
             }
         }
-        Event::MainEventsCleared|Event::UserEvent(..)=>{
+        Event::MainEventsCleared | Event::UserEvent(..) => {
             swapchain.surface().window().request_redraw();
         }
         _ => (),
     });
 }
 
-/// This method is called once during initialization, then again whenever the window is resized
-fn window_size_dependent_setup(
-    images: &[Arc<SwapchainImage<Window>>],
-    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
-    dynamic_state: &mut DynamicState,
-) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
-    let dimensions = images[0].dimensions();
-
-    let viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-        depth_range: 0.0..1.0,
-    };
-    dynamic_state.viewports = Some(vec![viewport]);
-
-    images
-        .iter()
-        .map(|image| {
-            Arc::new(
-                Framebuffer::start(render_pass.clone())
-                    .add(image.clone())
-                    .unwrap()
-                    .build()
-                    .unwrap(),
-            ) as Arc<dyn FramebufferAbstract + Send + Sync>
-        })
-        .collect::<Vec<_>>()
-}
 /// Time of day as seconds since midnight. Used for clock in demo app.
 pub fn seconds_since_midnight() -> f64 {
     let time = chrono::Local::now().time();

@@ -9,9 +9,7 @@ use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::ops::BitOr;
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{
-    AutoCommandBuffer, DynamicState, SubpassContents,
-};
+use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
@@ -19,6 +17,7 @@ use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{RenderPass, RenderPassDesc, Subpass};
 use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount};
 
+use std::mem::transmute;
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
@@ -27,7 +26,6 @@ use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::sync::GpuFuture;
-use std::mem::transmute;
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -67,7 +65,7 @@ pub struct EguiVulkanoRenderPass {
 
     sampler: Arc<Sampler>,
 }
-
+///shader
 impl EguiVulkanoRenderPass {
     pub fn new(
         device: Arc<Device>,
@@ -158,20 +156,23 @@ impl EguiVulkanoRenderPass {
             vs::ty::UniformBuffer {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
             },
-        ).unwrap();
-        let descriptor_set_0 =Arc::new( PersistentDescriptorSet::start(
-            self.pipeline
-                .layout()
-                .descriptor_set_layout(0)
-                .unwrap()
-                .clone(),
         )
-        .add_buffer(uniform)
-        .unwrap()
-        .add_sampler(self.sampler.clone())
-        .unwrap()
-        .build()
-        .unwrap());
+        .unwrap();
+        let descriptor_set_0 = Arc::new(
+            PersistentDescriptorSet::start(
+                self.pipeline
+                    .layout()
+                    .descriptor_set_layout(0)
+                    .unwrap()
+                    .clone(),
+            )
+            .add_buffer(uniform)
+            .unwrap()
+            .add_sampler(self.sampler.clone())
+            .unwrap()
+            .build()
+            .unwrap(),
+        );
 
         let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
             self.device.clone(),
@@ -218,7 +219,7 @@ impl EguiVulkanoRenderPass {
                 vertices.iter().map(|v| EguiVulkanoVertex {
                     a_pos: v.pos.into(),
                     a_tex_coord: v.uv.into(),
-                    a_color:unsafe {transmute(v.color.to_array())}
+                    a_color: unsafe { transmute(v.color.to_array()) },
                 }),
             )
             .unwrap();
@@ -282,7 +283,11 @@ impl EguiVulkanoRenderPass {
             return;
         }
         let format = vulkano::format::Format::R8G8B8A8Srgb;
-        let it:Vec<[u8;4]>= texture.pixels.iter().map(|x|{Color32::from_white_alpha(*x).to_array()}).collect();
+        let it: Vec<[u8; 4]> = texture
+            .pixels
+            .iter()
+            .map(|x| Color32::from_white_alpha(*x).to_array())
+            .collect();
 
         let image = vulkano::image::ImmutableImage::from_iter(
             it.iter().cloned(),
