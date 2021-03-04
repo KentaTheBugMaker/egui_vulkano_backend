@@ -7,11 +7,9 @@ use crate::render_pass::EguiRenderPassDesc;
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::sync::Arc;
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool};
+use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{CommandBuffer, DynamicState, SubpassContents};
-use vulkano::descriptor::descriptor_set::{
-    PersistentDescriptorSet, PersistentDescriptorSetImg, StdDescriptorPoolAlloc,
-};
+use vulkano::descriptor::descriptor_set::{PersistentDescriptorSet};
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
@@ -58,24 +56,14 @@ pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,
     vertex_buffers: Vec<Arc<CpuAccessibleBuffer<[EguiVulkanoVertex]>>>,
     index_buffers: Vec<Arc<CpuAccessibleBuffer<[u32]>>>,
-    egui_texture_descriptor_set: Option<
-        Arc<
-            PersistentDescriptorSet<
-                (
-                    (),
-                    PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
-                ),
-                StdDescriptorPoolAlloc,
-            >,
-        >,
-    >,
+    egui_texture_descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
     egui_texture_version: Option<u64>,
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     sampler: Arc<Sampler>,
-    uniform_buffer_fs: Arc<CpuBufferPool<Sampler>>,
-    uniform_buffer_vs: Arc<CpuBufferPool<vs::ty::UniformBuffer>>,
+    uniform_buffer_vs: Arc<CpuAccessibleBuffer<vs::ty::UniformBuffer>>,
+    descriptor_set_0: Arc<dyn DescriptorSet + Send + Sync>,
 }
 
 impl EguiVulkanoRenderPass {
@@ -135,8 +123,22 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
-        let uniform_buffer_fs = Arc::new(CpuBufferPool::uniform_buffer(device.clone()));
-        let uniform_buffer_vs = Arc::new(CpuBufferPool::uniform_buffer(device.clone()));
+        let uniform_buffer_vs =CpuAccessibleBuffer::from_data(device.clone(),BufferUsage::uniform_buffer(),false,vs::ty::UniformBuffer{
+            u_screen_size:[1.0,1.0]
+        }).unwrap();
+
+        let descriptor_set_0 = Arc::new(
+            PersistentDescriptorSet::start(
+                pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
+            )
+            .add_buffer(uniform_buffer_vs.clone())
+            .unwrap()
+            .add_sampler(sampler.clone())
+            .unwrap()
+            .build()
+            .unwrap(),
+        ) as Arc<dyn DescriptorSet + Send + Sync>;
+
         Self {
             pipeline,
             vertex_buffers: vec![],
@@ -147,9 +149,8 @@ impl EguiVulkanoRenderPass {
             device,
             queue,
             sampler,
-
-            uniform_buffer_fs,
             uniform_buffer_vs,
+            descriptor_set_0,
         }
     }
     pub fn execute(
@@ -341,12 +342,7 @@ impl EguiVulkanoRenderPass {
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
         image_view: Arc<dyn ImageViewAccess + Sync + Send>,
-    ) -> Arc<
-        PersistentDescriptorSet<(
-            (),
-            PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
-        )>,
-    > {
+    ) -> Arc<dyn DescriptorSet + Send + Sync> {
         Arc::new(
             PersistentDescriptorSet::start(
                 pipeline.layout().descriptor_set_layout(1).unwrap().clone(),
@@ -360,17 +356,7 @@ impl EguiVulkanoRenderPass {
     fn get_descriptor(
         &self,
         texture_id: TextureId,
-    ) -> Option<
-        Arc<
-            PersistentDescriptorSet<
-                (
-                    (),
-                    PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
-                ),
-                StdDescriptorPoolAlloc,
-            >,
-        >,
-    > {
+    ) -> Option<Arc<dyn DescriptorSet + Send + Sync>> {
         if let egui::TextureId::User(id) = texture_id {
             self.user_textures
                 .get(id as usize)
@@ -448,18 +434,7 @@ impl epi::TextureAllocator for EguiVulkanoRenderPass {
 struct UserTexture {
     pixels: Vec<u8>,
     size: [u32; 2],
-
-    descriptor_set: Option<
-        Arc<
-            PersistentDescriptorSet<
-                (
-                    (),
-                    PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
-                ),
-                StdDescriptorPoolAlloc,
-            >,
-        >,
-    >,
+    descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
 }
 mod fs {
     vulkano_shaders::shader! {
