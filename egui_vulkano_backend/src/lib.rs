@@ -27,6 +27,7 @@ use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::sync::GpuFuture;
+use std::mem::transmute;
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -217,10 +218,7 @@ impl EguiVulkanoRenderPass {
                 vertices.iter().map(|v| EguiVulkanoVertex {
                     a_pos: v.pos.into(),
                     a_tex_coord: v.uv.into(),
-                    a_color: ((v.color.r() as u32) << 24)
-                        | ((v.color.g() as u32) << 16)
-                        | ((v.color.b() as u32) << 8)
-                        | (v.color.a() as u32),
+                    a_color:unsafe {transmute(v.color.to_array())}
                 }),
             )
             .unwrap();
@@ -283,9 +281,11 @@ impl EguiVulkanoRenderPass {
         if self.egui_texture_version == Some(texture.version) {
             return;
         }
-        let format = vulkano::format::Format::R8Srgb;
+        let format = vulkano::format::Format::R8G8B8A8Srgb;
+        let it:Vec<[u8;4]>= texture.pixels.iter().map(|x|{Color32::from_white_alpha(*x).to_array()}).collect();
+
         let image = vulkano::image::ImmutableImage::from_iter(
-            texture.pixels.iter().cloned(),
+            it.iter().cloned(),
             Dimensions::Dim2d {
                 width: texture.width as u32,
                 height: texture.height as u32,

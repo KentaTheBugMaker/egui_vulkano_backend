@@ -230,6 +230,9 @@ fn main() {
                 }
             }
         }
+        Event::MainEventsCleared|Event::UserEvent(..)=>{
+            swapchain.surface().window().request_redraw();
+        }
         _ => (),
     });
 }
