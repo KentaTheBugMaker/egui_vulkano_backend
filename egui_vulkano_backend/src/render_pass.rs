@@ -12,8 +12,11 @@ pub struct EguiRenderPassDesc {
 }
 
 unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for EguiRenderPassDesc {
-    fn convert_clear_values(&self, _x: Vec<ClearValue>) -> Box<dyn Iterator<Item = ClearValue>> {
-        unimplemented!()
+    fn convert_clear_values(
+        &self,
+        clear_values: Vec<ClearValue>,
+    ) -> Box<dyn Iterator<Item = ClearValue>> {
+        Box::new(clear_values.into_iter())
     }
 }
 unsafe impl RenderPassDesc for EguiRenderPassDesc {

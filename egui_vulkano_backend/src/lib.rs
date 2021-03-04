@@ -10,19 +10,20 @@ use std::ops::BitOr;
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBuffer, DynamicState, SubpassContents,
+    AutoCommandBuffer, AutoCommandBufferBuilder, CommandBuffer, DynamicState, SubpassContents,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
-use vulkano::framebuffer::{LoadOp, RenderPass, RenderPassDesc, Subpass};
-use vulkano::image::{AttachmentImage, Dimensions, ImageViewAccess, MipmapsCount};
+use vulkano::framebuffer::{RenderPass, RenderPassDesc, Subpass};
+use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount};
 
+use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
-use vulkano::pipeline::viewport::Scissor;
+use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::sync::GpuFuture;
@@ -164,16 +165,10 @@ impl EguiVulkanoRenderPass {
     }
     pub fn execute(
         &mut self,
-        color_attachment: Arc<AttachmentImage>,
+        color_attachment: Arc<dyn ImageViewAccess + Send + Sync>,
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
-        clear_color: Option<[f32; 4]>,
-    ) {
-        let load_op = if let Some(_color) = clear_color {
-            vulkano::framebuffer::LoadOp::Clear
-        } else {
-            vulkano::framebuffer::LoadOp::Load
-        };
+    ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
         let frame_buffer = Arc::new(
             vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
                 .add(color_attachment)
@@ -181,23 +176,17 @@ impl EguiVulkanoRenderPass {
                 .build()
                 .expect("failed to create frame buffer"),
         );
-
         let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::new(
             self.device.clone(),
             self.queue.family(),
         )
         .expect("failed to create command buffer builder");
-        if load_op == LoadOp::Clear {
-            pass.begin_render_pass(
-                frame_buffer,
-                SubpassContents::Inline,
-                vec![clear_color.unwrap().into()],
-            )
-            .unwrap();
-        } else {
-            pass.begin_render_pass(frame_buffer, SubpassContents::Inline, vec![])
-                .unwrap();
-        }
+        pass.begin_render_pass(
+            frame_buffer,
+            SubpassContents::Inline,
+            vec![[0.0, 0.0, 0.0, 0.0].into()],
+        )
+        .unwrap();
         let scale_factor = screen_descriptor.scale_factor;
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
@@ -209,6 +198,11 @@ impl EguiVulkanoRenderPass {
             write_mask: None,
             reference: None,
         };
+        dynamic.viewports = Some(vec![Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [physical_width as f32, physical_height as f32],
+            depth_range: Default::default(),
+        }]);
         for ((egui::ClippedMesh(clip_rect, mesh), vertex_buffer), index_buffer) in paint_jobs
             .iter()
             .zip(self.vertex_buffers.iter())
@@ -265,19 +259,14 @@ impl EguiVulkanoRenderPass {
             }
         }
         pass.end_render_pass().unwrap();
-        let command_buffer = pass.build().unwrap();
-        command_buffer
-            .execute(self.queue.clone())
-            .unwrap()
-            .then_signal_fence_and_flush()
-            .unwrap();
+        pass.build().unwrap()
     }
     pub fn upload_egui_texture(&mut self, texture: &Texture) {
         //no change
         if self.egui_texture_version == Some(texture.version) {
             return;
         }
-        let format = vulkano::format::R8G8B8A8Srgb;
+        let format = vulkano::format::Format::R8Srgb;
         let image = vulkano::image::ImmutableImage::from_iter(
             texture.pixels.iter().cloned(),
             Dimensions::Dim2d {
@@ -378,7 +367,7 @@ impl EguiVulkanoRenderPass {
                 None => {
                     let index_buffer = CpuAccessibleBuffer::from_iter(
                         self.device.clone(),
-                        BufferUsage::index_buffer(),
+                        BufferUsage::index_buffer().bitor(BufferUsage::transfer_destination()),
                         false,
                         indices.iter().cloned(),
                     )
@@ -404,7 +393,7 @@ impl EguiVulkanoRenderPass {
                 None => {
                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
                         self.device.clone(),
-                        BufferUsage::index_buffer(),
+                        BufferUsage::vertex_buffer().bitor(BufferUsage::transfer_destination()),
                         false,
                         vertices.iter().map(|v| EguiVulkanoVertex {
                             a_pos: v.pos.into(),
@@ -421,7 +410,7 @@ impl EguiVulkanoRenderPass {
                 Some(target) => {
                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
                         self.device.clone(),
-                        BufferUsage::index_buffer(),
+                        BufferUsage::transfer_source(),
                         false,
                         vertices.iter().map(|v| EguiVulkanoVertex {
                             a_pos: v.pos.into(),
