@@ -61,7 +61,10 @@ pub struct EguiVulkanoRenderPass {
     egui_texture_descriptor_set: Option<
         Arc<
             PersistentDescriptorSet<
-                ((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>),
+                (
+                    (),
+                    PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
+                ),
                 StdDescriptorPoolAlloc,
             >,
         >,
@@ -277,7 +280,7 @@ impl EguiVulkanoRenderPass {
         )
         .unwrap();
         image.1.flush().unwrap();
-        let image_view = image.0 as Arc<dyn ImageViewAccess>;
+        let image_view = image.0 as Arc<dyn ImageViewAccess + Sync + Send>;
         let pipeline = self.pipeline.clone();
         self.egui_texture_descriptor_set =
             Some(Self::create_texture_binding_from_view(pipeline, image_view));
@@ -325,7 +328,7 @@ impl EguiVulkanoRenderPass {
                     )
                     .unwrap();
                     future.flush().unwrap();
-                    let image_view = image as Arc<dyn ImageViewAccess>;
+                    let image_view = image as Arc<dyn ImageViewAccess + Sync + Send>;
                     user_texture.descriptor_set = Some(Self::create_texture_binding_from_view(
                         pipeline.clone(),
                         image_view,
@@ -337,9 +340,13 @@ impl EguiVulkanoRenderPass {
 
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
-        image_view: Arc<dyn ImageViewAccess>,
-    ) -> Arc<PersistentDescriptorSet<((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>)>>
-    {
+        image_view: Arc<dyn ImageViewAccess + Sync + Send>,
+    ) -> Arc<
+        PersistentDescriptorSet<(
+            (),
+            PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
+        )>,
+    > {
         Arc::new(
             PersistentDescriptorSet::start(
                 pipeline.layout().descriptor_set_layout(1).unwrap().clone(),
@@ -356,7 +363,10 @@ impl EguiVulkanoRenderPass {
     ) -> Option<
         Arc<
             PersistentDescriptorSet<
-                ((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>),
+                (
+                    (),
+                    PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
+                ),
                 StdDescriptorPoolAlloc,
             >,
         >,
@@ -397,7 +407,10 @@ impl EguiVulkanoRenderPass {
     /// mark vulkano image view as egui texture id
     /// enables fast and easy off-screen rendering
 
-    pub fn vulkano_texture_as_egui(&mut self, image_view: Arc<dyn ImageViewAccess>) -> TextureId {
+    pub fn vulkano_texture_as_egui(
+        &mut self,
+        image_view: Arc<dyn ImageViewAccess + Sync + Send>,
+    ) -> TextureId {
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
             let dimension = image_view.dimensions();
@@ -439,7 +452,10 @@ struct UserTexture {
     descriptor_set: Option<
         Arc<
             PersistentDescriptorSet<
-                ((), PersistentDescriptorSetImg<Arc<dyn ImageViewAccess>>),
+                (
+                    (),
+                    PersistentDescriptorSetImg<Arc<dyn ImageViewAccess + Sync + Send>>,
+                ),
                 StdDescriptorPoolAlloc,
             >,
         >,
