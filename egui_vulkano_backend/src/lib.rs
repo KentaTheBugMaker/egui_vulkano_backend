@@ -8,9 +8,9 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::ops::BitOr;
 use std::sync::Arc;
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, BufferAccess};
+use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{
-    AutoCommandBuffer, AutoCommandBufferBuilder, CommandBuffer, DynamicState, SubpassContents,
+    AutoCommandBuffer, DynamicState, SubpassContents,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
@@ -58,16 +58,13 @@ type Pipeline = GraphicsPipeline<
 
 pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,
-    vertex_buffers: Vec<Arc<CpuAccessibleBuffer<[EguiVulkanoVertex]>>>,
-    index_buffers: Vec<Arc<CpuAccessibleBuffer<[u32]>>>,
     egui_texture_descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
     egui_texture_version: Option<u64>,
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
 
-    uniform_buffer_vs: Arc<CpuAccessibleBuffer<vs::ty::UniformBuffer>>,
-    descriptor_set_0: Arc<dyn DescriptorSet + Send + Sync>,
+    sampler: Arc<Sampler>,
 }
 
 impl EguiVulkanoRenderPass {
@@ -128,39 +125,15 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
-        let uniform_buffer_vs = CpuAccessibleBuffer::from_data(
-            device.clone(),
-            BufferUsage::uniform_buffer().bitor(BufferUsage::transfer_destination()),
-            false,
-            vs::ty::UniformBuffer {
-                u_screen_size: [0.0, 0.0],
-            },
-        )
-        .unwrap();
-
-        let descriptor_set_0 = Arc::new(
-            PersistentDescriptorSet::start(
-                pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
-            )
-            .add_buffer(uniform_buffer_vs.clone())
-            .unwrap()
-            .add_sampler(sampler)
-            .unwrap()
-            .build()
-            .unwrap(),
-        ) as Arc<dyn DescriptorSet + Send + Sync>;
-
         Self {
             pipeline,
-            vertex_buffers: vec![],
-            index_buffers: vec![],
             egui_texture_descriptor_set: None,
             egui_texture_version: None,
             user_textures: vec![],
             device,
             queue,
-            uniform_buffer_vs,
-            descriptor_set_0,
+
+            sampler,
         }
     }
     pub fn execute(
@@ -176,7 +149,33 @@ impl EguiVulkanoRenderPass {
                 .build()
                 .expect("failed to create frame buffer"),
         );
-        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(),self.queue.family())
+        let logical = screen_descriptor.logical_size();
+        let uniform = CpuAccessibleBuffer::from_data(
+            self.device.clone(),
+            BufferUsage::uniform_buffer(),
+            false,
+            vs::ty::UniformBuffer {
+                u_screen_size: [logical.0 as f32, logical.1 as f32],
+            },
+        ).unwrap();
+        let descriptor_set_0 =Arc::new( PersistentDescriptorSet::start(
+            self.pipeline
+                .layout()
+                .descriptor_set_layout(0)
+                .unwrap()
+                .clone(),
+        )
+        .add_buffer(uniform)
+        .unwrap()
+        .add_sampler(self.sampler.clone())
+        .unwrap()
+        .build()
+        .unwrap());
+
+        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
+            self.device.clone(),
+            self.queue.family(),
+        )
         .expect("failed to create command buffer builder");
         pass.begin_render_pass(
             frame_buffer,
@@ -200,11 +199,32 @@ impl EguiVulkanoRenderPass {
             dimensions: [physical_width as f32, physical_height as f32],
             depth_range: Default::default(),
         }]);
-        for ((egui::ClippedMesh(clip_rect, mesh), vertex_buffer), index_buffer) in paint_jobs
-            .iter()
-            .zip(self.vertex_buffers.iter())
-            .zip(self.index_buffers.iter())
-        {
+        for egui::ClippedMesh(clip_rect, mesh) in paint_jobs.iter() {
+            //mesh to index and vertex buffer
+            let indices = &mesh.indices;
+            let index_buffer = CpuAccessibleBuffer::from_iter(
+                self.device.clone(),
+                BufferUsage::index_buffer().bitor(BufferUsage::transfer_destination()),
+                false,
+                indices.iter().cloned(),
+            )
+            .unwrap();
+            let vertices = &mesh.vertices;
+            let vertex_buffer = CpuAccessibleBuffer::from_iter(
+                self.device.clone(),
+                BufferUsage::vertex_buffer().bitor(BufferUsage::transfer_destination()),
+                false,
+                vertices.iter().map(|v| EguiVulkanoVertex {
+                    a_pos: v.pos.into(),
+                    a_tex_coord: v.uv.into(),
+                    a_color: ((v.color.r() as u32) << 24)
+                        | ((v.color.g() as u32) << 16)
+                        | ((v.color.b() as u32) << 8)
+                        | (v.color.a() as u32),
+                }),
+            )
+            .unwrap();
+
             let texture_id = mesh.texture_id;
             let texture_descriptor = self.get_descriptor(texture_id);
             //emit valid texturing
@@ -248,7 +268,7 @@ impl EguiVulkanoRenderPass {
                         &dynamic,
                         vertex_buffer.clone(),
                         index_buffer.clone(),
-                        (self.descriptor_set_0.clone(), texture_desc_set),
+                        (descriptor_set_0.clone(), texture_desc_set),
                         (),
                     )
                     .unwrap();
@@ -332,101 +352,6 @@ impl EguiVulkanoRenderPass {
                 }
             }
         }
-    }
-    pub fn update_buffers(
-        &mut self,
-        paint_jobs: &[egui::paint::ClippedMesh],
-        screen_desc: &ScreenDescriptor,
-    ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
-        let _index_size = self.index_buffers.len();
-        let _vertex_size = self.vertex_buffers.len();
-        let (logical_width, logical_height) = screen_desc.logical_size();
-        let mut command_buffer_builder =
-            AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(),self.queue.family()).unwrap();
-        let uniform = CpuAccessibleBuffer::from_data(
-            self.device.clone(),
-            BufferUsage::transfer_source(),
-            false,
-            vs::ty::UniformBuffer {
-                u_screen_size: [logical_width as f32, logical_height as f32],
-            },
-        )
-        .unwrap();
-        //copy screen size
-        command_buffer_builder
-            .copy_buffer(uniform, self.uniform_buffer_vs.clone())
-            .unwrap();
-
-        for (i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
-            //write index data to each index buffer
-            let indices = &mesh.indices;
-            match self.index_buffers.get(i) {
-                //if slot none alloc new slot
-                None => {
-                    let index_buffer = CpuAccessibleBuffer::from_iter(
-                        self.device.clone(),
-                        BufferUsage::index_buffer().bitor(BufferUsage::transfer_destination()),
-                        false,
-                        indices.iter().cloned(),
-                    )
-                    .unwrap();
-                    self.index_buffers.push(index_buffer);
-                }
-                Some(target) => {
-                    let index_buffer = CpuAccessibleBuffer::from_iter(
-                        self.device.clone(),
-                        BufferUsage::transfer_source(),
-                        false,
-                        indices.iter().cloned(),
-                    )
-                    .unwrap();
-                command_buffer_builder.copy_buffer(index_buffer,target.clone()).unwrap();
-                }
-            }
-            let vertices = &mesh.vertices;
-            match self.vertex_buffers.get(i) {
-                //if slot none alloc new slot
-                None => {
-                    let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                        self.device.clone(),
-                        BufferUsage::vertex_buffer().bitor(BufferUsage::transfer_destination()),
-                        false,
-                        vertices.iter().map(|v| EguiVulkanoVertex {
-                            a_pos: v.pos.into(),
-                            a_tex_coord: v.uv.into(),
-                            a_color: ((v.color.r() as u32) << 24)
-                                | ((v.color.g() as u32) << 16)
-                                | ((v.color.b() as u32) << 8)
-                                | (v.color.a() as u32),
-                        }),
-                    )
-                    .unwrap();
-                    self.vertex_buffers.push(vertex_buffer);
-                }
-                Some(target) => {
-                    let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                        self.device.clone(),
-                        BufferUsage::transfer_source(),
-                        false,
-                        vertices.iter().map(|v| EguiVulkanoVertex {
-                            a_pos: v.pos.into(),
-                            a_tex_coord: v.uv.into(),
-                            a_color: ((v.color.r() as u32) << 24)
-                                | ((v.color.g() as u32) << 16)
-                                | ((v.color.b() as u32) << 8)
-                                | (v.color.a() as u32),
-                        }),
-                    )
-                    .unwrap();
-                    command_buffer_builder
-                        .copy_buffer(vertex_buffer, target.clone())
-                        .unwrap();
-                }
-            }
-        }
-
-        command_buffer_builder.build().unwrap()
-
     }
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
