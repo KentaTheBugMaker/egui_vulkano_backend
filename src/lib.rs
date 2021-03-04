@@ -61,7 +61,7 @@ type Pipeline = GraphicsPipeline<
     Box<dyn PipelineLayoutAbstract + Send + Sync>,
     Arc<RenderPass<EguiRenderPassDesc>>,
 >;
-type UniformBinding = ([f32; 2], Sampler);
+
 pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,
     vertex_buffers: Vec<Arc<CpuAccessibleBuffer<[EguiVulkanoVertex]>>>,
@@ -71,7 +71,7 @@ pub struct EguiVulkanoRenderPass {
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    sampler: Arc<Sampler>,
+
     uniform_buffer_vs: Arc<CpuAccessibleBuffer<vs::ty::UniformBuffer>>,
     descriptor_set_0: Arc<dyn DescriptorSet + Send + Sync>,
 }
@@ -149,7 +149,7 @@ impl EguiVulkanoRenderPass {
             )
             .add_buffer(uniform_buffer_vs.clone())
             .unwrap()
-            .add_sampler(sampler.clone())
+            .add_sampler(sampler)
             .unwrap()
             .build()
             .unwrap(),
@@ -164,7 +164,6 @@ impl EguiVulkanoRenderPass {
             user_textures: vec![],
             device,
             queue,
-            sampler,
             uniform_buffer_vs,
             descriptor_set_0,
         }
@@ -374,7 +373,9 @@ impl EguiVulkanoRenderPass {
         )
         .unwrap();
         //copy screen size
-        command_buffer_builder.copy_buffer(uniform, self.uniform_buffer_vs.clone());
+        command_buffer_builder
+            .copy_buffer(uniform, self.uniform_buffer_vs.clone())
+            .unwrap();
         for (i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
             //write index data to each index buffer
             let indices = &mesh.indices;
@@ -398,7 +399,9 @@ impl EguiVulkanoRenderPass {
                         indices.iter().cloned(),
                     )
                     .unwrap();
-                    command_buffer_builder.copy_buffer(index_buffer, target.clone());
+                    command_buffer_builder
+                        .copy_buffer(index_buffer, target.clone())
+                        .unwrap();
                 }
             }
             let vertices = &mesh.vertices;
@@ -436,11 +439,19 @@ impl EguiVulkanoRenderPass {
                         }),
                     )
                     .unwrap();
-                    command_buffer_builder.copy_buffer(vertex_buffer, target.clone());
+                    command_buffer_builder
+                        .copy_buffer(vertex_buffer, target.clone())
+                        .unwrap();
                 }
             }
         }
-        command_buffer_builder.build().unwrap().execute(self.queue.clone()).unwrap().then_signal_fence_and_flush();
+        command_buffer_builder
+            .build()
+            .unwrap()
+            .execute(self.queue.clone())
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap();
     }
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
