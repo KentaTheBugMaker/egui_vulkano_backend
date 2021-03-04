@@ -86,7 +86,6 @@ impl EguiVulkanoRenderPass {
             vulkano::pipeline::GraphicsPipeline::start()
                 .viewports_scissors_dynamic(1)
                 .render_pass(Subpass::from(render_pass, 0).unwrap())
-                .cull_mode_back()
                 .depth_stencil_disabled()
                 .fragment_shader(fs.main_entry_point(), ())
                 .vertex_input_single_buffer()
