@@ -6,15 +6,19 @@ extern crate vulkano_shaders;
 use crate::render_pass::EguiRenderPassDesc;
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
+use std::ops::BitOr;
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{CommandBuffer, DynamicState, SubpassContents};
+use vulkano::command_buffer::{
+    AutoCommandBufferBuilder, CommandBuffer, DynamicState, SubpassContents,
+};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{LoadOp, RenderPass, RenderPassDesc, Subpass};
 use vulkano::image::{AttachmentImage, Dimensions, ImageViewAccess, MipmapsCount};
+use vulkano::memory::pool::{PotentialDedicatedAllocation, StdMemoryPoolAlloc};
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
@@ -45,7 +49,13 @@ pub struct ScreenDescriptor {
     /// HiDPI scale factor.
     pub scale_factor: f32,
 }
-
+impl ScreenDescriptor {
+    fn logical_size(&self) -> (u32, u32) {
+        let logical_width = self.physical_width as f32 / self.scale_factor;
+        let logical_height = self.physical_height as f32 / self.scale_factor;
+        (logical_width as u32, logical_height as u32)
+    }
+}
 type Pipeline = GraphicsPipeline<
     SingleBufferDefinition<EguiVulkanoVertex>,
     Box<dyn PipelineLayoutAbstract + Send + Sync>,
@@ -125,10 +135,10 @@ impl EguiVulkanoRenderPass {
         .unwrap();
         let uniform_buffer_vs = CpuAccessibleBuffer::from_data(
             device.clone(),
-            BufferUsage::uniform_buffer(),
+            BufferUsage::uniform_buffer().bitor(BufferUsage::transfer_destination()),
             false,
             vs::ty::UniformBuffer {
-                u_screen_size: [1.0, 1.0],
+                u_screen_size: [0.0, 0.0],
             },
         )
         .unwrap();
@@ -254,7 +264,7 @@ impl EguiVulkanoRenderPass {
                         &dynamic,
                         vertex_buffer.clone(),
                         index_buffer.clone(),
-                        texture_desc_set,
+                        (self.descriptor_set_0.clone(), texture_desc_set),
                         (),
                     )
                     .unwrap();
@@ -344,7 +354,93 @@ impl EguiVulkanoRenderPass {
             }
         }
     }
-
+    pub fn update_buffers(
+        &mut self,
+        paint_jobs: &[egui::paint::ClippedMesh],
+        screen_desc: &ScreenDescriptor,
+    ) {
+        let index_size = self.index_buffers.len();
+        let vertex_size = self.vertex_buffers.len();
+        let (logical_width, logical_height) = screen_desc.logical_size();
+        let mut command_buffer_builder =
+            AutoCommandBufferBuilder::new(self.device.clone(), self.queue.family()).unwrap();
+        let uniform = CpuAccessibleBuffer::from_data(
+            self.device.clone(),
+            BufferUsage::transfer_source(),
+            false,
+            vs::ty::UniformBuffer {
+                u_screen_size: [logical_width as f32, logical_height as f32],
+            },
+        )
+        .unwrap();
+        //copy screen size
+        command_buffer_builder.copy_buffer(uniform, self.uniform_buffer_vs.clone());
+        for (i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
+            //write index data to each index buffer
+            let indices = &mesh.indices;
+            match self.index_buffers.get(i) {
+                //if slot none alloc new slot
+                None => {
+                    let index_buffer = CpuAccessibleBuffer::from_iter(
+                        self.device.clone(),
+                        BufferUsage::index_buffer(),
+                        false,
+                        indices.iter().cloned(),
+                    )
+                    .unwrap();
+                    self.index_buffers.push(index_buffer);
+                }
+                Some(target) => {
+                    let index_buffer = CpuAccessibleBuffer::from_iter(
+                        self.device.clone(),
+                        BufferUsage::transfer_source(),
+                        false,
+                        indices.iter().cloned(),
+                    )
+                    .unwrap();
+                    command_buffer_builder.copy_buffer(index_buffer, target.clone());
+                }
+            }
+            let vertices = &mesh.vertices;
+            match self.vertex_buffers.get(i) {
+                //if slot none alloc new slot
+                None => {
+                    let vertex_buffer = CpuAccessibleBuffer::from_iter(
+                        self.device.clone(),
+                        BufferUsage::index_buffer(),
+                        false,
+                        vertices.iter().map(|v| EguiVulkanoVertex {
+                            position: v.pos.into(),
+                            tex_coord: v.uv.into(),
+                            color: ((v.color.r() as u32) << 24)
+                                | ((v.color.g() as u32) << 16)
+                                | ((v.color.b() as u32) << 8)
+                                | (v.color.a() as u32),
+                        }),
+                    )
+                    .unwrap();
+                    self.vertex_buffers.push(vertex_buffer);
+                }
+                Some(target) => {
+                    let vertex_buffer = CpuAccessibleBuffer::from_iter(
+                        self.device.clone(),
+                        BufferUsage::index_buffer(),
+                        false,
+                        vertices.iter().map(|v| EguiVulkanoVertex {
+                            position: v.pos.into(),
+                            tex_coord: v.uv.into(),
+                            color: ((v.color.r() as u32) << 24)
+                                | ((v.color.g() as u32) << 16)
+                                | ((v.color.b() as u32) << 8)
+                                | (v.color.a() as u32),
+                        }),
+                    )
+                    .unwrap();
+                    command_buffer_builder.copy_buffer(vertex_buffer, target.clone());
+                }
+            }
+        }
+    }
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
         image_view: Arc<dyn ImageViewAccess + Sync + Send>,
