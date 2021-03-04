@@ -18,7 +18,7 @@ use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{LoadOp, RenderPass, RenderPassDesc, Subpass};
 use vulkano::image::{AttachmentImage, Dimensions, ImageViewAccess, MipmapsCount};
-use vulkano::memory::pool::{PotentialDedicatedAllocation, StdMemoryPoolAlloc};
+
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
@@ -359,8 +359,8 @@ impl EguiVulkanoRenderPass {
         paint_jobs: &[egui::paint::ClippedMesh],
         screen_desc: &ScreenDescriptor,
     ) {
-        let index_size = self.index_buffers.len();
-        let vertex_size = self.vertex_buffers.len();
+        let _index_size = self.index_buffers.len();
+        let _vertex_size = self.vertex_buffers.len();
         let (logical_width, logical_height) = screen_desc.logical_size();
         let mut command_buffer_builder =
             AutoCommandBufferBuilder::new(self.device.clone(), self.queue.family()).unwrap();
@@ -440,6 +440,7 @@ impl EguiVulkanoRenderPass {
                 }
             }
         }
+        command_buffer_builder.build().unwrap().execute(self.queue.clone()).unwrap().then_signal_fence_and_flush();
     }
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
