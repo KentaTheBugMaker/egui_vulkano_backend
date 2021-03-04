@@ -65,7 +65,7 @@ pub struct EguiVulkanoRenderPass {
 
     sampler: Arc<Sampler>,
 }
-///shader
+///shader c
 impl EguiVulkanoRenderPass {
     pub fn new(
         device: Arc<Device>,

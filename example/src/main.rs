@@ -2,9 +2,9 @@ use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::format::Format;
+
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{Dimensions, ImageUsage, ImmutableImage, MipmapsCount, SwapchainImage};
+use vulkano::image::{ImageAccess, ImageUsage, SwapchainImage};
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
@@ -22,10 +22,32 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
-use std::io::Cursor;
-
+use chrono::Timelike;
+use egui::FontDefinitions;
+use egui_vulkano_backend::ScreenDescriptor;
+use egui_winit_platform::{Platform, PlatformDescriptor};
+use epi::App;
 use std::sync::Arc;
+use std::time::Instant;
 
+/// A custom event type for the winit app.
+enum EguiEvent {
+    RequestRedraw,
+}
+
+/// This is the repaint signal type that egui needs for requesting a repaint from another thread.
+/// It sends the custom RequestRedraw event to the winit event loop.
+struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<EguiEvent>>);
+
+impl epi::RepaintSignal for ExampleRepaintSignal {
+    fn request_repaint(&self) {
+        self.0
+            .lock()
+            .unwrap()
+            .send_event(EguiEvent::RequestRedraw)
+            .ok();
+    }
+}
 fn main() {
     // The start of this example is exactly the same as `triangle`. You should read the
     // `triangle` example if you haven't done so yet.
@@ -39,7 +61,7 @@ fn main() {
         physical.ty()
     );
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::with_user_event();
     let surface = WindowBuilder::new()
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
@@ -59,7 +81,7 @@ fn main() {
         &device_ext,
         [(queue_family, 0.5)].iter().cloned(),
     )
-        .unwrap();
+    .unwrap();
     let queue = queues.next().unwrap();
 
     let (mut swapchain, images) = {
@@ -84,7 +106,7 @@ fn main() {
             true,
             ColorSpace::SrgbNonLinear,
         )
-            .unwrap()
+        .unwrap()
     };
 
     #[derive(Default, Debug, Clone)]
@@ -111,10 +133,10 @@ fn main() {
                 position: [0.5, 0.5],
             },
         ]
-            .iter()
-            .cloned(),
+        .iter()
+        .cloned(),
     )
-        .unwrap();
+    .unwrap();
 
     let vs = vs::Shader::load(device.clone()).unwrap();
     let fs = fs::Shader::load(device.clone()).unwrap();
@@ -134,47 +156,62 @@ fn main() {
                 depth_stencil: {}
             }
         )
-            .unwrap(),
+        .unwrap(),
     );
-    let image=vulkano::image::AttachmentImage::new(device.clone(),surface.window().inner_size().into(),swapchain.format()).unwrap();
+    //render target
+    let mut texture = vulkano::image::AttachmentImage::with_usage(
+        device.clone(),
+        swapchain.dimensions(),
+        swapchain.format(),
+        ImageUsage {
+            transfer_source: false,
+            transfer_destination: false,
+            sampled: true,
+            storage: false,
+            color_attachment: true,
+            depth_stencil_attachment: false,
+            transient_attachment: false,
+            input_attachment: false,
+        },
+    )
+    .unwrap();
+    //create renderer
+    let mut egui_render_pass = egui_vulkano_backend::EguiVulkanoRenderPass::new(
+        device.clone(),
+        queue.clone(),
+        texture.format(),
+    );
+    //init egui
+    let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
+        event_loop.create_proxy(),
+    )));
 
-    let (texture, tex_future) = {
-        let png_bytes = include_bytes!("image_img.png").to_vec();
-        let cursor = Cursor::new(png_bytes);
-        let decoder = png::Decoder::new(cursor);
-        let (info, mut reader) = decoder.read_info().unwrap();
-        let dimensions = Dimensions::Dim2d {
-            width: info.width,
-            height: info.height,
-        };
-        let mut image_data = Vec::new();
-        image_data.resize((info.width * info.height * 4) as usize, 0);
-        reader.next_frame(&mut image_data).unwrap();
+    // We use the egui_winit_platform crate as the platform.
+    let mut platform = Platform::new(PlatformDescriptor {
+        physical_width: swapchain.dimensions()[0],
+        physical_height: swapchain.dimensions()[1],
+        scale_factor: surface.window().scale_factor(),
+        font_definitions: FontDefinitions::default(),
+        style: Default::default(),
+    });
 
-        ImmutableImage::from_iter(
-            image_data.iter().cloned(),
-            dimensions,
-            MipmapsCount::One,
-            Format::R8G8B8A8Srgb,
-            queue.clone(),
-        )
-            .unwrap()
-    };
+    // Display the demo application that ships with egui.
+    let mut demo_app = egui_demo_lib::WrapApp::default();
 
     let sampler = Sampler::new(
         device.clone(),
         Filter::Linear,
         Filter::Linear,
         MipmapMode::Nearest,
-        SamplerAddressMode::Repeat,
-        SamplerAddressMode::Repeat,
-        SamplerAddressMode::Repeat,
+        SamplerAddressMode::ClampToEdge,
+        SamplerAddressMode::ClampToEdge,
+        SamplerAddressMode::ClampToEdge,
         0.0,
         1.0,
         0.0,
         0.0,
     )
-        .unwrap();
+    .unwrap();
 
     let pipeline = Arc::new(
         GraphicsPipeline::start()
@@ -192,7 +229,7 @@ fn main() {
     let layout = pipeline.layout().descriptor_set_layout(0).unwrap();
     let set = Arc::new(
         PersistentDescriptorSet::start(layout.clone())
-            .add_sampled_image(texture.clone(), sampler.clone())
+            .add_sampled_image(texture.clone(), sampler)
             .unwrap()
             .build()
             .unwrap(),
@@ -210,9 +247,13 @@ fn main() {
         window_size_dependent_setup(&images, render_pass.clone(), &mut dynamic_state);
 
     let mut recreate_swapchain = false;
-    let mut previous_frame_end = Some(tex_future.boxed());
-
-    event_loop.run(move |event, _, control_flow| match event {
+    let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
+    let start_time = Instant::now();
+    let mut previous_frame_time = None;
+    event_loop.run(move |event, _, control_flow|{
+                       // Pass the winit events to the platform integration.
+                       platform.handle_event(&event);
+        match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
             ..
@@ -226,6 +267,36 @@ fn main() {
             recreate_swapchain = true;
         }
         Event::RedrawEventsCleared => {
+            platform.update_time(start_time.elapsed().as_secs_f64());
+
+            // Begin to draw the UI frame.
+            let egui_start = Instant::now();
+            platform.begin_frame();
+            let mut app_output = epi::backend::AppOutput::default();
+
+            let mut frame = epi::backend::FrameBuilder {
+                info: epi::IntegrationInfo {
+                    web_info: None,
+                    cpu_usage: previous_frame_time,
+                    seconds_since_midnight: Some(seconds_since_midnight()),
+                    native_pixels_per_point: Some(surface.window().scale_factor() as _),
+                },
+                tex_allocator: &mut egui_render_pass,
+                output: &mut app_output,
+                repaint_signal: repaint_signal.clone(),
+            }
+            .build();
+
+            // Draw the demo application.
+            demo_app.update(&platform.context(), &mut frame);
+
+            // End the UI frame. We could now handle the output and draw the UI with the backend.
+            let (_output, paint_commands) = platform.end_frame();
+            let paint_jobs = platform.context().tessellate(paint_commands);
+
+            let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
+            previous_frame_time = Some(frame_time);
+
             previous_frame_end.as_mut().unwrap().cleanup_finished();
 
             if recreate_swapchain {
@@ -236,7 +307,6 @@ fn main() {
                         Err(SwapchainCreationError::UnsupportedDimensions) => return,
                         Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                     };
-
                 swapchain = new_swapchain;
                 framebuffers = window_size_dependent_setup(
                     &new_images,
@@ -260,7 +330,7 @@ fn main() {
                 recreate_swapchain = true;
             }
 
-            let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into()];
+            let clear_values = vec![[0.0, 0.0, 0.0, 1.0].into()];
             let mut builder =
                 AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                     .unwrap();
@@ -282,11 +352,47 @@ fn main() {
                 .end_render_pass()
                 .unwrap();
             let command_buffer = builder.build().unwrap();
+            let screen_descriptor = ScreenDescriptor {
+                physical_width: surface.window().inner_size().width,
+                physical_height: surface.window().inner_size().height,
+                scale_factor: surface.window().scale_factor() as f32,
+            };
+            egui_render_pass.upload_egui_texture(&platform.context().texture());
+            egui_render_pass.upload_pending_textures();
+            let render_command =
+                egui_render_pass.execute(texture.clone(), &paint_jobs, &screen_descriptor);
+
+            /*
+                            // Upload all resources for the GPU.
+                            let screen_descriptor = ScreenDescriptor {
+                                physical_width: sc_desc.width,
+                                physical_height: sc_desc.height,
+                                scale_factor: window.scale_factor() as f32,
+                            };
+                            egui_rpass.update_texture(&device, &queue, &platform.context().texture());
+                            egui_rpass.update_user_textures(&device, &queue);
+                            egui_rpass.update_buffers(&mut device, &mut queue, &paint_jobs, &screen_descriptor);
+
+                            // Record all render passes.
+                            egui_rpass.execute(
+                                &mut encoder,
+                                &output_frame.output.view,
+                                &paint_jobs,
+                                &screen_descriptor,
+                                Some(wgpu::Color::BLACK),
+                            );
+
+                            // Submit the commands.
+                            queue.submit(iter::once(encoder.finish()));
+                            *control_flow = ControlFlow::Poll;
+            */
 
             let future = previous_frame_end
                 .take()
                 .unwrap()
                 .join(acquire_future)
+                .then_execute(queue.clone(), render_command)
+                .unwrap()
                 .then_execute(queue.clone(), command_buffer)
                 .unwrap()
                 .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
@@ -305,8 +411,10 @@ fn main() {
                     previous_frame_end = Some(sync::now(device.clone()).boxed());
                 }
             }
+            *control_flow = ControlFlow::Poll
         }
         _ => (),
+    }
     });
 }
 
@@ -320,7 +428,7 @@ fn window_size_dependent_setup(
 
     let viewport = Viewport {
         origin: [0.0, 0.0],
-        dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+        dimensions: [dimensions.width() as f32, dimensions.height() as f32],
         depth_range: 0.0..1.0,
     };
     dynamic_state.viewports = Some(vec![viewport]);
@@ -347,7 +455,7 @@ mod vs {
 layout(location = 0) in vec2 position;
 layout(location = 0) out vec2 tex_coords;
 void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position = vec4(2.0*position, 0.0, 1.0);
     tex_coords = position + vec2(0.5);
 }"
     }
@@ -365,4 +473,10 @@ void main() {
     f_color = texture(tex, tex_coords);
 }"
     }
+}
+
+/// Time of day as seconds since midnight. Used for clock in demo app.
+pub fn seconds_since_midnight() -> f64 {
+    let time = chrono::Local::now().time();
+    time.num_seconds_from_midnight() as f64 + 1e-9 * (time.nanosecond() as f64)
 }
