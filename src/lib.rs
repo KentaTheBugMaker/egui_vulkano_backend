@@ -9,7 +9,7 @@ use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{CommandBuffer, DynamicState, SubpassContents};
-use vulkano::descriptor::descriptor_set::{PersistentDescriptorSet};
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
@@ -123,9 +123,15 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
-        let uniform_buffer_vs =CpuAccessibleBuffer::from_data(device.clone(),BufferUsage::uniform_buffer(),false,vs::ty::UniformBuffer{
-            u_screen_size:[1.0,1.0]
-        }).unwrap();
+        let uniform_buffer_vs = CpuAccessibleBuffer::from_data(
+            device.clone(),
+            BufferUsage::uniform_buffer(),
+            false,
+            vs::ty::UniformBuffer {
+                u_screen_size: [1.0, 1.0],
+            },
+        )
+        .unwrap();
 
         let descriptor_set_0 = Arc::new(
             PersistentDescriptorSet::start(
@@ -248,7 +254,7 @@ impl EguiVulkanoRenderPass {
                         &dynamic,
                         vertex_buffer.clone(),
                         index_buffer.clone(),
-                        (texture_desc_set),
+                        texture_desc_set,
                         (),
                     )
                     .unwrap();
