@@ -196,7 +196,7 @@ fn main() {
             //prepare
             egui_render_pass.upload_egui_texture(&platform.context().texture());
             egui_render_pass.upload_pending_textures();
-            egui_render_pass.update_buffers(&paint_jobs, &screen_descriptor);
+            let copy_command=egui_render_pass.update_buffers(&paint_jobs, &screen_descriptor);
             //exec
             let command_buffer = egui_render_pass.execute(
                 images[image_num].clone(),
@@ -211,6 +211,8 @@ fn main() {
                 .take()
                 .unwrap()
                 .join(acquire_future)
+                .then_execute(queue.clone(),copy_command)
+                .unwrap()
                 .then_execute(queue.clone(), command_buffer)
                 .unwrap()
                 .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)

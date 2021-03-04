@@ -8,7 +8,7 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::ops::BitOr;
 use std::sync::Arc;
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
+use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer, BufferAccess};
 use vulkano::command_buffer::{
     AutoCommandBuffer, AutoCommandBufferBuilder, CommandBuffer, DynamicState, SubpassContents,
 };
@@ -176,10 +176,7 @@ impl EguiVulkanoRenderPass {
                 .build()
                 .expect("failed to create frame buffer"),
         );
-        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::new(
-            self.device.clone(),
-            self.queue.family(),
-        )
+        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(),self.queue.family())
         .expect("failed to create command buffer builder");
         pass.begin_render_pass(
             frame_buffer,
@@ -340,12 +337,12 @@ impl EguiVulkanoRenderPass {
         &mut self,
         paint_jobs: &[egui::paint::ClippedMesh],
         screen_desc: &ScreenDescriptor,
-    ) {
+    ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
         let _index_size = self.index_buffers.len();
         let _vertex_size = self.vertex_buffers.len();
         let (logical_width, logical_height) = screen_desc.logical_size();
         let mut command_buffer_builder =
-            AutoCommandBufferBuilder::new(self.device.clone(), self.queue.family()).unwrap();
+            AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(),self.queue.family()).unwrap();
         let uniform = CpuAccessibleBuffer::from_data(
             self.device.clone(),
             BufferUsage::transfer_source(),
@@ -359,6 +356,7 @@ impl EguiVulkanoRenderPass {
         command_buffer_builder
             .copy_buffer(uniform, self.uniform_buffer_vs.clone())
             .unwrap();
+
         for (i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
             //write index data to each index buffer
             let indices = &mesh.indices;
@@ -382,9 +380,7 @@ impl EguiVulkanoRenderPass {
                         indices.iter().cloned(),
                     )
                     .unwrap();
-                    command_buffer_builder
-                        .copy_buffer(index_buffer, target.clone())
-                        .unwrap();
+                command_buffer_builder.copy_buffer(index_buffer,target.clone()).unwrap();
                 }
             }
             let vertices = &mesh.vertices;
@@ -428,13 +424,9 @@ impl EguiVulkanoRenderPass {
                 }
             }
         }
-        command_buffer_builder
-            .build()
-            .unwrap()
-            .execute(self.queue.clone())
-            .unwrap()
-            .then_signal_fence_and_flush()
-            .unwrap();
+
+        command_buffer_builder.build().unwrap()
+
     }
     fn create_texture_binding_from_view(
         pipeline: Arc<Pipeline>,
