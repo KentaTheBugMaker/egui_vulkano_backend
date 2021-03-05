@@ -141,7 +141,7 @@ impl EguiVulkanoRenderPass {
             framebuffers: vec![],
         }
     }
-    //
+    /// you must call when swapchain or render target resize or before first create_command_buffer call
     pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
         &mut self,
         image_views: &[Arc<SwapchainImage<Wnd>>],
@@ -159,7 +159,7 @@ impl EguiVulkanoRenderPass {
             })
             .collect::<Vec<_>>();
     }
-    // execute command and present to screen
+    /// execute command and present to screen
     pub fn present_to_screen<Wnd>(
         &mut self,
         command: AutoCommandBuffer<StandardCommandPoolAlloc>,
@@ -182,9 +182,9 @@ impl EguiVulkanoRenderPass {
     ///
     /// color attachment is render target.
     ///
-    /// When you pass None image num must passed this pattern is used for swapchain
+    /// If color_attachment is none then render to self framebuffer and image num must Some
     ///
-    /// When color attachment is some render to any image e.g. AttachmentImage SwapchainImage
+    /// If color attachment is some then render to any image e.g. AttachmentImage StorageImage
     pub fn create_command_buffer(
         &mut self,
 
@@ -334,7 +334,7 @@ impl EguiVulkanoRenderPass {
         pass.build().unwrap()
     }
     /// Update egui system texture
-    /// You must call before execute
+    /// You must call before every  create_command_buffer
     pub fn upload_egui_texture(&mut self, texture: &Texture) {
         //no change
         if self.egui_texture_version == Some(texture.version) {
@@ -383,7 +383,7 @@ impl EguiVulkanoRenderPass {
                 .and_then(|option| option.take());
         }
     }
-    /// egui use lazy texture allocating so you must call before every execute.
+    /// egui use lazy texture allocating so you must call before every create_command_buffer.
     pub fn upload_pending_textures(&mut self) {
         let pipeline = self.pipeline.clone();
         for user_texture in &mut self.user_textures {
