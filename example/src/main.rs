@@ -57,6 +57,7 @@ fn main() {
 
     let event_loop = EventLoop::with_user_event();
     let surface = WindowBuilder::new()
+        .with_title("Egui Vulkano Backend sample")
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
@@ -78,7 +79,7 @@ fn main() {
     .unwrap();
     let queue = queues.next().unwrap();
 
-    let (mut swapchain, images) = {
+    let mut swapchain = {
         let caps = surface.capabilities(physical).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let format = caps.supported_formats[0].0;
@@ -91,16 +92,7 @@ fn main() {
             format,
             dimensions,
             1,
-            ImageUsage {
-                transfer_source: false,
-                transfer_destination: true,
-                sampled: false,
-                storage: false,
-                color_attachment: true,
-                depth_stencil_attachment: false,
-                transient_attachment: false,
-                input_attachment: false,
-            },
+            ImageUsage::color_attachment(),
             &queue,
             SurfaceTransform::Identity,
             alpha,
@@ -110,12 +102,13 @@ fn main() {
             ColorSpace::SrgbNonLinear,
         )
         .unwrap()
+        .0
     };
 
     //create renderer
     let mut egui_render_pass =
         egui_vulkano_backend::EguiVulkanoRenderPass::new(device.clone(), queue, swapchain.format());
-    egui_render_pass.create_frame_buffers(&images);
+
     //init egui
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),
@@ -132,8 +125,8 @@ fn main() {
 
     // Display the demo application that ships with egui.
     let mut demo_app = egui_demo_lib::WrapApp::default();
-
-    let mut recreate_swapchain = false;
+    //we want to initialize all framebuffers so we check it true
+    let mut recreate_swapchain = true;
 
     let start_time = Instant::now();
     let mut previous_frame_time = None;
@@ -233,34 +226,6 @@ fn main() {
             _ => (),
         }
     });
-}
-
-mod vs {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        src: "
-#version 450
-layout(location = 0) in vec2 position;
-layout(location = 0) out vec2 tex_coords;
-void main() {
-    gl_Position = vec4(2.0*position, 0.0, 1.0);
-    tex_coords = position + vec2(0.5);
-}"
-    }
-}
-
-mod fs {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        src: "
-#version 450
-layout(location = 0) in vec2 tex_coords;
-layout(location = 0) out vec4 f_color;
-layout(set = 0, binding = 0) uniform sampler2D tex;
-void main() {
-    f_color = texture(tex, tex_coords);
-}"
-    }
 }
 
 /// Time of day as seconds since midnight. Used for clock in demo app.

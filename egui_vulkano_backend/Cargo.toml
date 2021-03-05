@@ -3,8 +3,11 @@ name = "egui_vulkano_backend"
 version = "0.0.1"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
-description="egui vulkano binding "
 license="MIT or Apache 2.0"
+description = "Backend code to use egui with vulkano."
+homepage = "https://github.com/t18b219k/egui_vulkano_backend"
+repository = "https://github.com/t18b219k/egui_vulkano_backend"
+readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
