@@ -1,6 +1,6 @@
 [package]
 name = "egui_vulkano_backend"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
 license="MIT OR Apache-2.0"
