@@ -10,7 +10,7 @@ use std::ops::BitOr;
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{
-    AutoCommandBuffer, CommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
+    AutoCommandBuffer, DynamicState, SubpassContents,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
@@ -20,7 +20,7 @@ use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subp
 use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount, SwapchainImage};
 
 use std::mem::transmute;
-use std::time::Duration;
+
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::framebuffer::Framebuffer;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
@@ -29,8 +29,8 @@ use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain::{PresentFuture, Swapchain, SwapchainAcquireFuture};
-use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture};
+use vulkano::swapchain::{SwapchainAcquireFuture};
+use vulkano::sync::{GpuFuture};
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {

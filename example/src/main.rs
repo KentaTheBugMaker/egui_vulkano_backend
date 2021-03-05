@@ -1,37 +1,35 @@
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBuffer, DynamicState, SubpassContents,
-};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+
+
+
 use vulkano::device::{Device, DeviceExtensions};
 
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
 use vulkano::image::{AttachmentImage, ImageAccess, ImageUsage, SwapchainImage};
 use vulkano::instance::{Instance, PhysicalDevice};
-use vulkano::pipeline::viewport::Viewport;
-use vulkano::pipeline::GraphicsPipeline;
-use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
+
+
+
 use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
     SwapchainCreationError,
 };
-use vulkano::sync;
-use vulkano::sync::{FlushError, GpuFuture};
+
+use vulkano::sync::{GpuFuture};
 
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Window, WindowBuilder};
+use winit::window::{WindowBuilder};
 
 use chrono::Timelike;
 use egui::FontDefinitions;
 use egui_vulkano_backend::ScreenDescriptor;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
-use std::ops::BitOr;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+
+use std::time::{Instant};
 
 /// A custom event type for the winit app.
 enum EguiEvent {
