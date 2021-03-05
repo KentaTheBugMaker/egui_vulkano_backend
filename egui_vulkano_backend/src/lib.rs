@@ -9,9 +9,7 @@ use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::ops::BitOr;
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{
-    AutoCommandBuffer, DynamicState, SubpassContents,
-};
+use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
@@ -29,8 +27,8 @@ use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain::{SwapchainAcquireFuture};
-use vulkano::sync::{GpuFuture};
+use vulkano::swapchain::SwapchainAcquireFuture;
+use vulkano::sync::GpuFuture;
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -176,7 +174,7 @@ impl EguiVulkanoRenderPass {
             .then_swapchain_present(self.queue.clone(), swap_chain, image_id)
             .then_signal_fence_and_flush()
         {
-            if ok.wait(None).is_ok(){};
+            if ok.wait(None).is_ok() {};
         }
     }
 

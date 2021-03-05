@@ -1,13 +1,7 @@
-
-
-
 use vulkano::device::{Device, DeviceExtensions};
 
-
-use vulkano::image::{ImageUsage};
+use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
-
-
 
 use vulkano::swapchain;
 use vulkano::swapchain::{
@@ -15,12 +9,12 @@ use vulkano::swapchain::{
     SwapchainCreationError,
 };
 
-use vulkano::sync::{GpuFuture};
+use vulkano::sync::GpuFuture;
 
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{WindowBuilder};
+use winit::window::WindowBuilder;
 
 use chrono::Timelike;
 use egui::FontDefinitions;
@@ -28,8 +22,7 @@ use egui_vulkano_backend::ScreenDescriptor;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 
-
-use std::time::{Instant};
+use std::time::Instant;
 
 /// A custom event type for the winit app.
 enum EguiEvent {
@@ -120,11 +113,8 @@ fn main() {
     };
 
     //create renderer
-    let mut egui_render_pass = egui_vulkano_backend::EguiVulkanoRenderPass::new(
-        device.clone(),
-        queue,
-        swapchain.format(),
-    );
+    let mut egui_render_pass =
+        egui_vulkano_backend::EguiVulkanoRenderPass::new(device.clone(), queue, swapchain.format());
     egui_render_pass.create_frame_buffers(&images);
     //init egui
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
