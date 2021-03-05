@@ -9,23 +9,28 @@ use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use std::ops::BitOr;
 use std::sync::Arc;
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
+use vulkano::command_buffer::{
+    AutoCommandBuffer, CommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
+};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
-use vulkano::framebuffer::{RenderPass, RenderPassDesc, Subpass};
-use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount};
+use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subpass};
+use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount, SwapchainImage};
 
 use std::mem::transmute;
+use std::time::Duration;
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
+use vulkano::framebuffer::Framebuffer;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::sync::GpuFuture;
+use vulkano::swapchain::{PresentFuture, Swapchain, SwapchainAcquireFuture};
+use vulkano::sync::{FenceSignalFuture, FlushError, GpuFuture};
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -54,7 +59,7 @@ type Pipeline = GraphicsPipeline<
     Box<dyn PipelineLayoutAbstract + Send + Sync>,
     Arc<RenderPass<EguiRenderPassDesc>>,
 >;
-
+/// egui rendering command builder
 pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,
     egui_texture_descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
@@ -62,11 +67,14 @@ pub struct EguiVulkanoRenderPass {
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-
     sampler: Arc<Sampler>,
+    framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 }
-///shader c
+
 impl EguiVulkanoRenderPass {
+    ///create command builder
+    ///
+    /// if render target format incompatible with swapchain format  may cause color glitch
     pub fn new(
         device: Arc<Device>,
         queue: Arc<Queue>,
@@ -132,21 +140,72 @@ impl EguiVulkanoRenderPass {
             queue,
 
             sampler,
+            framebuffers: vec![],
         }
     }
-    pub fn execute(
+    //
+    pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
         &mut self,
-        color_attachment: Arc<dyn ImageViewAccess + Send + Sync>,
+        image_views: &[Arc<SwapchainImage<Wnd>>],
+    ) {
+        self.framebuffers = image_views
+            .iter()
+            .map(|image| {
+                Arc::new(
+                    Framebuffer::start(self.pipeline.clone())
+                        .add(image.clone())
+                        .unwrap()
+                        .build()
+                        .unwrap(),
+                ) as Arc<dyn FramebufferAbstract + Send + Sync>
+            })
+            .collect::<Vec<_>>();
+    }
+    // execute command and present to screen
+    pub fn present_to_screen<Wnd>(
+        &mut self,
+        command: AutoCommandBuffer<StandardCommandPoolAlloc>,
+        acquire_future: SwapchainAcquireFuture<Wnd>,
+    ) {
+        let swap_chain = acquire_future.swapchain().clone();
+        let image_id = acquire_future.image_id();
+
+        if let Ok(ok) = acquire_future
+            .then_execute(self.queue.clone(), command)
+            .unwrap()
+            .then_swapchain_present(self.queue.clone(), swap_chain, image_id)
+            .then_signal_fence_and_flush()
+        {
+            ok.wait(None);
+        }
+    }
+
+    /// translate egui rendering request to vulkano AutoCommandBuffer
+    ///
+    /// color attachment is render target.
+    ///
+    /// When you pass None image num must passed this pattern is used for swapchain
+    ///
+    /// When color attachment is some render to any image e.g. AttachmentImage SwapchainImage
+    pub fn create_command_buffer(
+        &mut self,
+
+        color_attachment: Option<Arc<dyn ImageViewAccess + Send + Sync>>,
+        image_num: Option<usize>,
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
     ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
-        let frame_buffer = Arc::new(
-            vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
-                .add(color_attachment)
-                .unwrap()
-                .build()
-                .expect("failed to create frame buffer"),
-        );
+        let framebuffer = if let Some(color_attachment) = color_attachment {
+            Arc::new(
+                vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
+                    .add(color_attachment)
+                    .unwrap()
+                    .build()
+                    .expect("failed to create frame buffer"),
+            )
+        } else {
+            self.framebuffers[image_num.unwrap()].clone()
+        };
         let logical = screen_descriptor.logical_size();
         let uniform = CpuAccessibleBuffer::from_data(
             self.device.clone(),
@@ -179,7 +238,7 @@ impl EguiVulkanoRenderPass {
         )
         .expect("failed to create command buffer builder");
         pass.begin_render_pass(
-            frame_buffer,
+            framebuffer,
             SubpassContents::Inline,
             vec![[0.0, 0.0, 0.0, 0.0].into()],
         )
@@ -276,6 +335,8 @@ impl EguiVulkanoRenderPass {
         pass.end_render_pass().unwrap();
         pass.build().unwrap()
     }
+    /// Update egui system texture
+    /// You must call before execute
     pub fn upload_egui_texture(&mut self, texture: &Texture) {
         //no change
         if self.egui_texture_version == Some(texture.version) {
@@ -324,6 +385,7 @@ impl EguiVulkanoRenderPass {
                 .and_then(|option| option.take());
         }
     }
+    /// egui use lazy texture allocating so you must call before every execute.
     pub fn upload_pending_textures(&mut self) {
         let pipeline = self.pipeline.clone();
         for user_texture in &mut self.user_textures {
