@@ -161,7 +161,7 @@ impl EguiVulkanoRenderPass {
     }
     /// execute command and present to screen
     pub fn present_to_screen<Wnd>(
-        &mut self,
+        &self,
         command: AutoCommandBuffer<StandardCommandPoolAlloc>,
         acquire_future: SwapchainAcquireFuture<Wnd>,
     ) {
@@ -186,8 +186,7 @@ impl EguiVulkanoRenderPass {
     ///
     /// If color attachment is some then render to any image e.g. AttachmentImage StorageImage
     pub fn create_command_buffer(
-        &mut self,
-
+        &self,
         color_attachment: Option<Arc<dyn ImageViewAccess + Send + Sync>>,
         image_num: Option<usize>,
         paint_jobs: &[ClippedMesh],
