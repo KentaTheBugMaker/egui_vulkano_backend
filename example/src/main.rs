@@ -3,8 +3,8 @@
 
 use vulkano::device::{Device, DeviceExtensions};
 
-use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{AttachmentImage, ImageAccess, ImageUsage, SwapchainImage};
+
+use vulkano::image::{ImageUsage};
 use vulkano::instance::{Instance, PhysicalDevice};
 
 

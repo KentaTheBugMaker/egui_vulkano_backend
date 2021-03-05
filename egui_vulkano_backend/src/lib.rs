@@ -176,7 +176,7 @@ impl EguiVulkanoRenderPass {
             .then_swapchain_present(self.queue.clone(), swap_chain, image_id)
             .then_signal_fence_and_flush()
         {
-            ok.wait(None);
+            if ok.wait(None).is_ok(){};
         }
     }
 
