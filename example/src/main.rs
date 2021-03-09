@@ -23,6 +23,7 @@ use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 
 use std::time::Instant;
+use vulkano::format::Format;
 
 /// A custom event type for the winit app.
 enum EguiEvent {
@@ -82,7 +83,11 @@ fn main() {
     let mut swapchain = {
         let caps = surface.capabilities(physical).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        let format = caps.supported_formats[0].0;
+        //     let alpha = CompositeAlpha::PreMultiplied;
+        assert!(&caps
+            .supported_formats
+            .contains(&(Format::B8G8R8A8Srgb, ColorSpace::SrgbNonLinear)));
+        let format = Format::B8G8R8A8Srgb;
         let dimensions: [u32; 2] = surface.window().inner_size().into();
 
         Swapchain::new(

@@ -6,9 +6,9 @@ extern crate vulkano_shaders;
 use crate::render_pass::EguiRenderPassDesc;
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
-use std::ops::BitOr;
+
 use std::sync::Arc;
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
+use vulkano::buffer::{BufferSlice, BufferUsage, CpuAccessibleBuffer};
 use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
@@ -16,8 +16,6 @@ use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subpass};
 use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount, SwapchainImage};
-
-use std::mem::transmute;
 
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::framebuffer::Framebuffer;
@@ -117,9 +115,9 @@ impl EguiVulkanoRenderPass {
         );
         let sampler = Sampler::new(
             device.clone(),
-            Filter::Nearest,
-            Filter::Nearest,
-            MipmapMode::Nearest,
+            Filter::Linear,
+            Filter::Linear,
+            MipmapMode::Linear,
             SamplerAddressMode::ClampToEdge,
             SamplerAddressMode::ClampToEdge,
             SamplerAddressMode::ClampToEdge,
@@ -141,6 +139,7 @@ impl EguiVulkanoRenderPass {
             framebuffers: vec![],
         }
     }
+
     /// you must call when swapchain or render target resize or before first create_command_buffer call
     pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
         &mut self,
@@ -256,33 +255,61 @@ impl EguiVulkanoRenderPass {
             dimensions: [physical_width as f32, physical_height as f32],
             depth_range: Default::default(),
         }]);
-        for egui::ClippedMesh(clip_rect, mesh) in paint_jobs.iter() {
+        //allocate all indices and vertices
+        let mut all_indices = Vec::with_capacity(paint_jobs.len() * 6);
+        let mut all_vertices = Vec::with_capacity(paint_jobs.len() * 4);
+        let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
+        let mut indices_from = 0;
+        let mut vertices_from = 0;
+        for egui::ClippedMesh(_, mesh) in paint_jobs.iter() {
+            all_indices.extend_from_slice(mesh.indices.as_slice());
+            all_vertices.extend(mesh.vertices.iter().map(|v| unsafe {
+                EguiVulkanoVertex {
+                    a_pos: <[f32; 2]>::from(v.pos),
+                    a_tex_coord: <[f32; 2]>::from(v.uv),
+                    a_color: std::mem::transmute(v.color.to_array()),
+                }
+            }));
+            all_mesh_range.push((
+                indices_from..all_indices.len(),
+                vertices_from..all_vertices.len(),
+            ));
+            indices_from += mesh.indices.len();
+            vertices_from += mesh.vertices.len();
+        }
+        //create buffer
+        let index_buffer = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            BufferUsage::index_buffer(),
+            false,
+            all_indices.iter().cloned(),
+        )
+        .unwrap();
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            BufferUsage::vertex_buffer(),
+            false,
+            all_vertices.iter().cloned(),
+        )
+        .unwrap();
+
+        for (egui::ClippedMesh(clip_rect, mesh), range) in
+            paint_jobs.iter().zip(all_mesh_range.iter())
+        {
+            let index_range = range.0.clone();
+            let vertex_range = range.1.clone();
             //mesh to index and vertex buffer
-            let indices = &mesh.indices;
-            let index_buffer = CpuAccessibleBuffer::from_iter(
-                self.device.clone(),
-                BufferUsage::index_buffer().bitor(BufferUsage::transfer_destination()),
-                false,
-                indices.iter().cloned(),
-            )
-            .unwrap();
-            let vertices = &mesh.vertices;
-            let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                self.device.clone(),
-                BufferUsage::vertex_buffer().bitor(BufferUsage::transfer_destination()),
-                false,
-                vertices.iter().map(|v| EguiVulkanoVertex {
-                    a_pos: v.pos.into(),
-                    a_tex_coord: v.uv.into(),
-                    a_color: unsafe { transmute(v.color.to_array()) },
-                }),
-            )
-            .unwrap();
 
             let texture_id = mesh.texture_id;
             let texture_descriptor = self.get_descriptor(texture_id);
             //emit valid texturing
             if let Some(texture_desc_set) = texture_descriptor {
+                let index_buffer = BufferSlice::from_typed_buffer_access(index_buffer.clone())
+                    .slice(index_range)
+                    .unwrap();
+                let vertex_buffer = BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
+                    .slice(vertex_range)
+                    .unwrap();
                 // Transform clip rect to physical pixels.
                 let clip_min_x = scale_factor * clip_rect.min.x;
                 let clip_min_y = scale_factor * clip_rect.min.y;
@@ -320,8 +347,8 @@ impl EguiVulkanoRenderPass {
                     pass.draw_indexed(
                         self.pipeline.clone(),
                         &dynamic,
-                        vertex_buffer.clone(),
-                        index_buffer.clone(),
+                        vertex_buffer,
+                        index_buffer,
                         (descriptor_set_0.clone(), texture_desc_set),
                         (),
                     )
