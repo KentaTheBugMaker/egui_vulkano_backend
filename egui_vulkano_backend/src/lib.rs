@@ -8,7 +8,7 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
 use std::sync::Arc;
-use vulkano::buffer::{BufferSlice, BufferUsage, CpuAccessibleBuffer};
+use vulkano::buffer::{BufferSlice, BufferUsage, CpuAccessibleBuffer, BufferAccess};
 use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
@@ -27,6 +27,7 @@ use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;
+use std::ops::Range;
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -335,15 +336,18 @@ impl EguiVulkanoRenderPass {
                     let y = clip_min_y.min(physical_height);
                     let width = width.min(physical_width - x);
                     let height = height.min(physical_height - y);
-
                     // skip rendering with zero-sized clip areas
                     if width == 0 || height == 0 {
                         continue;
                     }
+
                     dynamic.scissors = Some(vec![Scissor {
                         origin: [x as i32, y as i32],
                         dimensions: [width, height],
                     }]);
+                    let inner_index_buffer= index_buffer.inner();
+
+
                     pass.draw_indexed(
                         self.pipeline.clone(),
                         &dynamic,
@@ -399,7 +403,7 @@ impl EguiVulkanoRenderPass {
             }
         }
         let id = TextureId::User(self.user_textures.len() as u64);
-        self.user_textures.push(Some(Default::default()));
+        self.user_textures.push(None);
         id
     }
     fn free_user_texture(&mut self, id: TextureId) {
@@ -479,19 +483,23 @@ impl EguiVulkanoRenderPass {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
-        //pre alloc area
+        println!("new texture arrived {:?}",id);
         if let TextureId::User(id) = id {
-            let mut pixels = Vec::with_capacity(size.0 * size.1 * 4);
-            //unpack pixels
-            for pixel in srgba_pixels {
-                pixels.extend(pixel.to_array().iter())
+            // test Texture slot allocated
+            if let Some(slot)=self.user_textures.get_mut(id as usize){
+                //pre alloc pixels
+                let mut pixels = Vec::with_capacity(size.0 * size.1 * 4);
+                //unpack pixels
+                for pixel in srgba_pixels {
+                    pixels.extend(pixel.to_array().iter())
+                }
+                //write to slot
+                *slot=Some(UserTexture{
+                    pixels,
+                    size: [size.0 as u32,size.1 as u32],
+                    descriptor_set: None
+                })
             }
-            let texture = UserTexture {
-                pixels,
-                size: [size.0 as u32, size.1 as u32],
-                descriptor_set: None,
-            };
-            self.user_textures.insert(id as usize, Some(texture))
         }
     }
     /// mark vulkano image view as egui texture id
@@ -505,16 +513,15 @@ impl EguiVulkanoRenderPass {
         if let egui::TextureId::User(id) = id {
             let dimension = image_view.dimensions();
             let pipeline = self.pipeline.clone();
-            self.user_textures.insert(
-                id as usize,
-                Some(UserTexture {
+            if let Some(slot)=self.user_textures.get_mut(id as usize){
+                *slot=Some(UserTexture {
                     pixels: vec![],
                     size: [dimension.width(), dimension.height()],
                     descriptor_set: Some(Self::create_texture_binding_from_view(
                         pipeline, image_view,
                     )),
-                }),
-            )
+                });
+            }
         }
         id
     }
