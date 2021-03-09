@@ -1,4 +1,5 @@
 mod render_pass;
+mod shader;
 
 extern crate vulkano;
 extern crate vulkano_shaders;
@@ -345,14 +346,7 @@ impl EguiVulkanoRenderPass {
                         origin: [x as i32, y as i32],
                         dimensions: [width, height],
                     }]);
-                    pass.draw_indexed(
-                        self.pipeline.clone(),
-                        &dynamic,
-                        vertex_buffer,
-                        index_buffer,
-                        (descriptor_set_0.clone(), texture_desc_set),
-                        (),
-                    )
+                    pass.draw_indexed(self.pipeline.clone(), &dynamic, vertex_buffer, index_buffer, (descriptor_set_0.clone(), texture_desc_set), (), vec![])
                     .unwrap();
                 }
             }

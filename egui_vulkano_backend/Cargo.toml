@@ -1,6 +1,6 @@
 [package]
 name = "egui_vulkano_backend"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
 license="MIT OR Apache-2.0"
@@ -11,6 +11,6 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-vulkano = "0.20.0"
-vulkano-shaders = "0.20.0"
+vulkano = "^0.21.0"
+vulkano-shaders = "^0.21.0"
 epi = "0.10.0"
