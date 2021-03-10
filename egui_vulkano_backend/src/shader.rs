@@ -196,27 +196,30 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
         None
     }
 }
-pub(crate) unsafe fn create_pipeline(
-    device: Arc<Device>,
-    render_target_format: Format,
-) -> Arc<Pipeline> {
-    let vs_module = ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")).unwrap();
-    let fs_module = ShaderModule::new(device.clone(), include_bytes!("shaders/frag.spv")).unwrap();
+pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
+    let vs_module =
+        unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
+    let fs_module =
+        unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/frag.spv")) }.unwrap();
     let main = CString::new("main").unwrap();
-    let vs_entry = vs_module.graphics_entry_point(
-        &main,
-        VSInterfaceIn,
-        VSInterfaceOut,
-        PipelineLayout,
-        GraphicsShaderType::Vertex,
-    );
-    let fs_entry = fs_module.graphics_entry_point(
-        &main,
-        FSInterfaceIn,
-        FSInterfaceOut,
-        PipelineLayout,
-        GraphicsShaderType::Fragment,
-    );
+    let vs_entry = unsafe {
+        vs_module.graphics_entry_point(
+            &main,
+            VSInterfaceIn,
+            VSInterfaceOut,
+            PipelineLayout,
+            GraphicsShaderType::Vertex,
+        )
+    };
+    let fs_entry = unsafe {
+        fs_module.graphics_entry_point(
+            &main,
+            FSInterfaceIn,
+            FSInterfaceOut,
+            PipelineLayout,
+            GraphicsShaderType::Fragment,
+        )
+    };
     let render_pass = Arc::new(
         EguiRenderPassDesc {
             color: (render_target_format, 0),
@@ -249,7 +252,7 @@ pub(crate) unsafe fn create_pipeline(
                 mask_blue: true,
                 mask_alpha: true,
             })
-            .build(device.clone())
+            .build(device)
             .unwrap(),
     );
     pipeline

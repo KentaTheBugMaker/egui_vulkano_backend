@@ -14,14 +14,13 @@ use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
-use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subpass};
+use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
 use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount, SwapchainImage};
 
 use crate::shader::create_pipeline;
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::framebuffer::Framebuffer;
-use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
+
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
@@ -36,7 +35,7 @@ struct EguiVulkanoVertex {
     a_color: u32,
 }
 struct UniformBuffer {
-    u_screen_size: [f32; 2],
+    _u_screen_size: [f32; 2],
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 pub struct ScreenDescriptor {
@@ -80,7 +79,7 @@ impl EguiVulkanoRenderPass {
         queue: Arc<Queue>,
         render_target_format: vulkano::format::Format,
     ) -> Self {
-        let pipeline = unsafe { create_pipeline(device.clone(), render_target_format) };
+        let pipeline = create_pipeline(device.clone(), render_target_format);
         let sampler = Sampler::new(
             device.clone(),
             Filter::Linear,
@@ -176,7 +175,7 @@ impl EguiVulkanoRenderPass {
             BufferUsage::uniform_buffer(),
             false,
             UniformBuffer {
-                u_screen_size: [logical.0 as f32, logical.1 as f32],
+                _u_screen_size: [logical.0 as f32, logical.1 as f32],
             },
         )
         .unwrap();
