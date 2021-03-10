@@ -67,13 +67,13 @@ pub struct EguiVulkanoRenderPass {
     device: Arc<Device>,
     queue: Arc<Queue>,
     sampler: Arc<Sampler>,
-    framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 }
 
 impl EguiVulkanoRenderPass {
     ///create command builder
     ///
-    /// if render target format incompatible with swapchain format  may cause color glitch
+    /// if render target format incompatible with SwapChain format may cause color glitch
     pub fn new(
         device: Arc<Device>,
         queue: Arc<Queue>,
@@ -103,16 +103,16 @@ impl EguiVulkanoRenderPass {
             queue,
 
             sampler,
-            framebuffers: vec![],
+            frame_buffers: vec![],
         }
     }
 
-    /// you must call when swapchain or render target resize or before first create_command_buffer call
+    /// you must call when SwapChain or render target resize or before first create_command_buffer call
     pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
         &mut self,
         image_views: &[Arc<SwapchainImage<Wnd>>],
     ) {
-        self.framebuffers = image_views
+        self.frame_buffers = image_views
             .iter()
             .map(|image| {
                 Arc::new(
@@ -167,7 +167,7 @@ impl EguiVulkanoRenderPass {
                     .expect("failed to create frame buffer"),
             )
         } else {
-            self.framebuffers[image_num.unwrap()].clone()
+            self.frame_buffers[image_num.unwrap()].clone()
         };
         let logical = screen_descriptor.logical_size();
         let uniform = CpuAccessibleBuffer::from_data(
