@@ -1,6 +1,5 @@
 #version 450
-
-
+//glslangValidator shader.frag -V -o frag.spv
 layout(location = 0) in vec2 v_tex_coord;
 layout(location = 1) in vec4 v_color;
 layout(location = 0) out vec4 f_color;

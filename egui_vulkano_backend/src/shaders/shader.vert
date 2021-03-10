@@ -1,13 +1,13 @@
 #version 450
+//glslangValidator shader.vert -V -o vert.spv
 layout(set = 0, binding = 0) uniform UniformBuffer {
     vec2 u_screen_size;
 };
-
-layout(location = 0) in vec2 a_pos;
-layout(location = 1) in vec2 a_tex_coord;
-layout(location = 2) in uint a_color;
-layout(location = 0) out vec2 v_tex_coord;
-layout(location = 1) out vec4 v_color;
+layout(location = 0) in vec2 a_pos;//R32G32SFloat
+layout(location = 1) in vec2 a_tex_coord;//R32G32SFloat
+layout(location = 2) in uint a_color;//R32Uint
+layout(location = 0) out vec2 v_tex_coord;//R32G32SFloat
+layout(location = 1) out vec4 v_color;//R32G32B32A32SFloat
 
 vec3 linear_from_srgb(vec3 srgb) {
     bvec3 cutoff = lessThan(srgb, vec3(10.31475));

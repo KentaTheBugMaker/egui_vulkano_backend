@@ -2,7 +2,6 @@ mod render_pass;
 mod shader;
 
 extern crate vulkano;
-extern crate vulkano_shaders;
 
 use crate::render_pass::EguiRenderPassDesc;
 use epi::egui;
@@ -18,6 +17,7 @@ use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subpass};
 use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount, SwapchainImage};
 
+use crate::shader::create_pipeline;
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::framebuffer::Framebuffer;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
@@ -29,12 +29,14 @@ use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;
 
-
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
     a_pos: [f32; 2],
     a_tex_coord: [f32; 2],
     a_color: u32,
+}
+struct UniformBuffer {
+    u_screen_size: [f32; 2],
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 pub struct ScreenDescriptor {
@@ -78,43 +80,7 @@ impl EguiVulkanoRenderPass {
         queue: Arc<Queue>,
         render_target_format: vulkano::format::Format,
     ) -> Self {
-        let fs = fs::Shader::load(device.clone()).unwrap();
-        let vs = vs::Shader::load(device.clone()).unwrap();
-
-        let render_pass = Arc::new(
-            EguiRenderPassDesc {
-                color: (render_target_format, 0),
-            }
-            .build_render_pass(device.clone())
-            .unwrap(),
-        );
-        let pipeline = Arc::new(
-            vulkano::pipeline::GraphicsPipeline::start()
-                .viewports_scissors_dynamic(1)
-                .render_pass(Subpass::from(render_pass, 0).unwrap())
-                .depth_stencil_disabled()
-                .fragment_shader(fs.main_entry_point(), ())
-                .vertex_input_single_buffer()
-                .vertex_shader(vs.main_entry_point(), ())
-                .primitive_topology(PrimitiveTopology::TriangleList)
-                .front_face_clockwise()
-                .polygon_mode_fill()
-                .blend_collective(AttachmentBlend {
-                    enabled: true,
-                    color_op: BlendOp::Add,
-                    color_source: BlendFactor::One,
-                    color_destination: BlendFactor::OneMinusSrcAlpha,
-                    alpha_op: BlendOp::Add,
-                    alpha_source: BlendFactor::OneMinusDstAlpha,
-                    alpha_destination: BlendFactor::One,
-                    mask_red: true,
-                    mask_green: true,
-                    mask_blue: true,
-                    mask_alpha: true,
-                })
-                .build(device.clone())
-                .unwrap(),
-        );
+        let pipeline = unsafe { create_pipeline(device.clone(), render_target_format) };
         let sampler = Sampler::new(
             device.clone(),
             Filter::Linear,
@@ -209,7 +175,7 @@ impl EguiVulkanoRenderPass {
             self.device.clone(),
             BufferUsage::uniform_buffer(),
             false,
-            vs::ty::UniformBuffer {
+            UniformBuffer {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
             },
         )
@@ -346,7 +312,15 @@ impl EguiVulkanoRenderPass {
                         origin: [x as i32, y as i32],
                         dimensions: [width, height],
                     }]);
-                    pass.draw_indexed(self.pipeline.clone(), &dynamic, vertex_buffer, index_buffer, (descriptor_set_0.clone(), texture_desc_set), (), vec![])
+                    pass.draw_indexed(
+                        self.pipeline.clone(),
+                        &dynamic,
+                        vertex_buffer,
+                        index_buffer,
+                        (descriptor_set_0.clone(), texture_desc_set),
+                        (),
+                        vec![],
+                    )
                     .unwrap();
                 }
             }
@@ -474,10 +448,10 @@ impl EguiVulkanoRenderPass {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
-        println!("new texture arrived {:?}",id);
+        println!("new texture arrived {:?}", id);
         if let TextureId::User(id) = id {
             // test Texture slot allocated
-            if let Some(slot)=self.user_textures.get_mut(id as usize){
+            if let Some(slot) = self.user_textures.get_mut(id as usize) {
                 //pre alloc pixels
                 let mut pixels = Vec::with_capacity(size.0 * size.1 * 4);
                 //unpack pixels
@@ -485,10 +459,10 @@ impl EguiVulkanoRenderPass {
                     pixels.extend(pixel.to_array().iter())
                 }
                 //write to slot
-                *slot=Some(UserTexture{
+                *slot = Some(UserTexture {
                     pixels,
-                    size: [size.0 as u32,size.1 as u32],
-                    descriptor_set: None
+                    size: [size.0 as u32, size.1 as u32],
+                    descriptor_set: None,
                 })
             }
         }
@@ -504,8 +478,8 @@ impl EguiVulkanoRenderPass {
         if let egui::TextureId::User(id) = id {
             let dimension = image_view.dimensions();
             let pipeline = self.pipeline.clone();
-            if let Some(slot)=self.user_textures.get_mut(id as usize){
-                *slot=Some(UserTexture {
+            if let Some(slot) = self.user_textures.get_mut(id as usize) {
+                *slot = Some(UserTexture {
                     pixels: vec![],
                     size: [dimension.width(), dimension.height()],
                     descriptor_set: Some(Self::create_texture_binding_from_view(
@@ -538,15 +512,17 @@ struct UserTexture {
     size: [u32; 2],
     descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
 }
+/*
 mod fs {
     vulkano_shaders::shader! {
     ty:"fragment",
-    path:"src/shaders/fragment.glsl"
+    path:"src/shaders/shader.frag"
     }
 }
 mod vs {
     vulkano_shaders::shader! {
     ty:"vertex",
-    path:"src/shaders/vertex.glsl"
+    path:"src/shaders/shader.vert"
     }
 }
+*/

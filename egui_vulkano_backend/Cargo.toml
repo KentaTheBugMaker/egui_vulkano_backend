@@ -12,5 +12,4 @@ readme = "README.md"
 
 [dependencies]
 vulkano = "^0.21.0"
-vulkano-shaders = "^0.21.0"
 epi = "0.10.0"
