@@ -5,10 +5,14 @@
 ![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Apache](https://img.shields.io/badge/license-Apache-blue.svg)
 
-Backend code to run egui using vulkano.
+Backend code to run [egui](https://crates.io/crates/egui) using [vulkano](https://crates.io/crates/vulkano).
+
+this crate rendering only you need I/O egui integration e.g. [egui_winit_platform](https://crates.io/crates/egui_winit_platform) 
 ## known bug
  * When change tab in sample at debug build cause crash
 caused from vulkano debug assert so please build in release. 
+## Update 
+ * remove vulkano_shader dependency extremely faster build time 
 ## Fixed
  * [can't pass color test ](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
  * [![bug screen shot]](https://github.com/t18b219k/egui_vulkano_backend/blob/master/Screenshot%20from%202021-03-09%2023-48-42.png)
