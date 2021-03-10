@@ -6,22 +6,12 @@ on:
     branches: [ master ]
   workflow_dispatch:
 jobs:
-  auto_format:
+  auto_format_fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - run: cargo fmt
-      - uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-            commit_message: Apply automatic format 
-  auto_fix:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
       - run: cargo fix
       - uses: stefanzweifel/git-auto-commit-action@v4
         with:
-            commit_message: Apply automatic fix 
-      
-      
-    
+            commit_message: Apply automatic format and fix
