@@ -12,7 +12,6 @@ caused from vulkano debug assert
 * remove vulkano_shader dependency 
 ## Fixed 
  * [can't pass color test ](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
- * ![bug screen shot](https://github.com/t18b219k/egui_vulkano_backend/blob/master/Screenshot%20from%202021-03-09%2023-48-42.png)
 ## Credit
   * egui_winit_platform developper
   * egui_wgpu_backend developper

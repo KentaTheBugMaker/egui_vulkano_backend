@@ -15,7 +15,7 @@ caused from vulkano debug assert so please build in release.
  * remove vulkano_shader dependency extremely faster build time 
 ## Fixed
  * [can't pass color test ](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
- * [![bug screen shot]](https://github.com/t18b219k/egui_vulkano_backend/blob/master/Screenshot%20from%202021-03-09%2023-48-42.png)
+
 ## Example
 We have created [a simple example](https://github.com/t18b219k/egui_vulkano_backend/tree/master/example) project to show you, how to use this crate.
 
