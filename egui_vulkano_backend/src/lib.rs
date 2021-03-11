@@ -474,6 +474,7 @@ impl EguiVulkanoRenderPass {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
+        #[cfg(debug_assertions)]
         println!("new texture arrived {:?}", id);
         if let TextureId::User(id) = id {
             // test Texture slot allocated
@@ -538,17 +539,4 @@ struct UserTexture {
     size: [u32; 2],
     descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
 }
-/*
-mod fs {
-    vulkano_shaders::shader! {
-    ty:"fragment",
-    path:"src/shaders/shader.frag"
-    }
-}
-mod vs {
-    vulkano_shaders::shader! {
-    ty:"vertex",
-    path:"src/shaders/shader.vert"
-    }
-}
-*/
+
