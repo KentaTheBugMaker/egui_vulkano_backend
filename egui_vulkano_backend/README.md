@@ -13,17 +13,17 @@ None
 ## Update 
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation
- * Skip render glitch mesh (index or vertices empty)
+ * skip render glitch mesh (index or vertices empty)
 ## Fixed
- * [can't pass color test ](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
- * When change tab in sample at debug build cause crash
+ * [can't pass color test.](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
+ * change tab in sample at debug build cause crash.
 ## Example
 We have created [a simple example](https://github.com/t18b219k/egui_vulkano_backend/tree/master/example) project to show you, how to use this crate.
 
 ## License
-egui_vulkano_backend is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
+egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
 
 See [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT).
 ## Credits
- * egui_wgpu_backend developpers
- * egui_wgpu_platform developpers
+ * egui_wgpu_backend developers
+ * egui_winit_platform developers

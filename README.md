@@ -10,11 +10,11 @@ None
 ## update 
  * remove vulkano_shader dependency 
  * faster index and vertex buffer allocation
- * Skip render glitch mesh (indices or vertices empty)
+ * skip render glitch mesh (indices or vertices empty)
 ## Fixed 
  * [can't pass color test ](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
- * When change tab in sample at debug build cause crash
+ * change tab in sample at debug build cause crash
 ## Credit
- * egui_winit_platform developper
- * egui_wgpu_backend developper
+ * egui_winit_platform developers
+ * egui_wgpu_backend developers
   
