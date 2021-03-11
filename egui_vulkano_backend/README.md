@@ -25,5 +25,5 @@ egui_vulkano_backend is distributed under the terms of both the MIT license and 
 
 See [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT).
 ## Credits
-    * egui_wgpu_backend developpers
-    * egui_wgpu_platform developpers
+ * egui_wgpu_backend developpers
+ * egui_wgpu_platform developpers
