@@ -222,13 +222,26 @@ impl EguiVulkanoRenderPass {
             dimensions: [physical_width as f32, physical_height as f32],
             depth_range: Default::default(),
         }]);
+        //measure vertices and indices length
+        let mut vert_len = 0;
+        let mut ind_len=0;
+        for job in paint_jobs.iter(){
+            ind_len+=job.1.indices.len();
+            vert_len+=job.1.vertices.len();
+        }
         //allocate all indices and vertices
-        let mut all_indices = Vec::with_capacity(paint_jobs.len() * 6);
-        let mut all_vertices = Vec::with_capacity(paint_jobs.len() * 4);
+
+        let mut all_indices = Vec::with_capacity(ind_len);
+        let mut all_vertices = Vec::with_capacity(vert_len);
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
         let mut indices_from = 0;
         let mut vertices_from = 0;
-        for egui::ClippedMesh(_, mesh) in paint_jobs.iter() {
+        println!("start frame");
+        for (i,egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
+            if mesh.vertices.len()==0 || mesh.indices.len()==0{
+
+            }
+            println!("mesh {} vertices {} indices {}",i,mesh.vertices.len(),mesh.indices.len());
             all_indices.extend_from_slice(mesh.indices.as_slice());
             all_vertices.extend(mesh.vertices.iter().map(|v| unsafe {
                 EguiVulkanoVertex {
@@ -259,7 +272,7 @@ impl EguiVulkanoRenderPass {
             all_vertices.iter().cloned(),
         )
         .unwrap();
-
+        println!("end frame");
         for (egui::ClippedMesh(clip_rect, mesh), range) in
             paint_jobs.iter().zip(all_mesh_range.iter())
         {
