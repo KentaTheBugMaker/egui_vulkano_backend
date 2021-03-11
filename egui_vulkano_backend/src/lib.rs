@@ -539,4 +539,3 @@ struct UserTexture {
     size: [u32; 2],
     descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
 }
-
