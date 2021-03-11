@@ -224,10 +224,10 @@ impl EguiVulkanoRenderPass {
         }]);
         //measure vertices and indices length
         let mut vert_len = 0;
-        let mut ind_len=0;
-        for job in paint_jobs.iter(){
-            ind_len+=job.1.indices.len();
-            vert_len+=job.1.vertices.len();
+        let mut ind_len = 0;
+        for job in paint_jobs.iter() {
+            ind_len += job.1.indices.len();
+            vert_len += job.1.vertices.len();
         }
         //allocate all indices and vertices
 
@@ -236,12 +236,22 @@ impl EguiVulkanoRenderPass {
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
         let mut indices_from = 0;
         let mut vertices_from = 0;
+        #[cfg(debug_assertions)]
         println!("start frame");
-        for (i,egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
-            if mesh.vertices.len()==0 || mesh.indices.len()==0{
-
+        for (i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
+            #[cfg(debug_assertions)]
+            println!(
+                "mesh {} vertices {} indices {}",
+                i,
+                mesh.vertices.len(),
+                mesh.indices.len()
+            );
+            if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+                all_mesh_range.push(None);
+                #[cfg(debug_assertions)]
+                println!("Detect glitch mesh");
+                continue;
             }
-            println!("mesh {} vertices {} indices {}",i,mesh.vertices.len(),mesh.indices.len());
             all_indices.extend_from_slice(mesh.indices.as_slice());
             all_vertices.extend(mesh.vertices.iter().map(|v| unsafe {
                 EguiVulkanoVertex {
@@ -250,10 +260,10 @@ impl EguiVulkanoRenderPass {
                     a_color: std::mem::transmute(v.color.to_array()),
                 }
             }));
-            all_mesh_range.push((
+            all_mesh_range.push(Some((
                 indices_from..all_indices.len(),
                 vertices_from..all_vertices.len(),
-            ));
+            )));
             indices_from += mesh.indices.len();
             vertices_from += mesh.vertices.len();
         }
@@ -272,68 +282,72 @@ impl EguiVulkanoRenderPass {
             all_vertices.iter().cloned(),
         )
         .unwrap();
+        #[cfg(debug_assertions)]
         println!("end frame");
         for (egui::ClippedMesh(clip_rect, mesh), range) in
             paint_jobs.iter().zip(all_mesh_range.iter())
         {
-            let index_range = range.0.clone();
-            let vertex_range = range.1.clone();
-            //mesh to index and vertex buffer
+            if let Some(range) = range {
+                let index_range = range.0.clone();
+                let vertex_range = range.1.clone();
+                //mesh to index and vertex buffer
 
-            let texture_id = mesh.texture_id;
-            let texture_descriptor = self.get_descriptor(texture_id);
-            //emit valid texturing
-            if let Some(texture_desc_set) = texture_descriptor {
-                let index_buffer = BufferSlice::from_typed_buffer_access(index_buffer.clone())
-                    .slice(index_range)
-                    .unwrap();
-                let vertex_buffer = BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
-                    .slice(vertex_range)
-                    .unwrap();
-                // Transform clip rect to physical pixels.
-                let clip_min_x = scale_factor * clip_rect.min.x;
-                let clip_min_y = scale_factor * clip_rect.min.y;
-                let clip_max_x = scale_factor * clip_rect.max.x;
-                let clip_max_y = scale_factor * clip_rect.max.y;
+                let texture_id = mesh.texture_id;
+                let texture_descriptor = self.get_descriptor(texture_id);
+                //emit valid texturing
+                if let Some(texture_desc_set) = texture_descriptor {
+                    let index_buffer = BufferSlice::from_typed_buffer_access(index_buffer.clone())
+                        .slice(index_range)
+                        .unwrap();
+                    let vertex_buffer =
+                        BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
+                            .slice(vertex_range)
+                            .unwrap();
+                    // Transform clip rect to physical pixels.
+                    let clip_min_x = scale_factor * clip_rect.min.x;
+                    let clip_min_y = scale_factor * clip_rect.min.y;
+                    let clip_max_x = scale_factor * clip_rect.max.x;
+                    let clip_max_y = scale_factor * clip_rect.max.y;
 
-                // Make sure clip rect can fit within an `u32`.
-                let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
-                let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
-                let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
-                let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
+                    // Make sure clip rect can fit within an `u32`.
+                    let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
+                    let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
+                    let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
+                    let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
 
-                let clip_min_x = clip_min_x.round() as u32;
-                let clip_min_y = clip_min_y.round() as u32;
-                let clip_max_x = clip_max_x.round() as u32;
-                let clip_max_y = clip_max_y.round() as u32;
+                    let clip_min_x = clip_min_x.round() as u32;
+                    let clip_min_y = clip_min_y.round() as u32;
+                    let clip_max_x = clip_max_x.round() as u32;
+                    let clip_max_y = clip_max_y.round() as u32;
 
-                let width = (clip_max_x - clip_min_x).max(1);
-                let height = (clip_max_y - clip_min_y).max(1);
-                {
-                    // clip scissor rectangle to target size
-                    let x = clip_min_x.min(physical_width);
-                    let y = clip_min_y.min(physical_height);
-                    let width = width.min(physical_width - x);
-                    let height = height.min(physical_height - y);
-                    // skip rendering with zero-sized clip areas
-                    if width == 0 || height == 0 {
-                        continue;
+                    let width = (clip_max_x - clip_min_x).max(1);
+                    let height = (clip_max_y - clip_min_y).max(1);
+                    {
+                        // clip scissor rectangle to target size
+                        let x = clip_min_x.min(physical_width);
+                        let y = clip_min_y.min(physical_height);
+                        let width = width.min(physical_width - x);
+                        let height = height.min(physical_height - y);
+                        // skip rendering with zero-sized clip areas
+                        if width == 0 || height == 0 {
+                            continue;
+                        }
+
+                        dynamic.scissors = Some(vec![Scissor {
+                            origin: [x as i32, y as i32],
+                            dimensions: [width, height],
+                        }]);
+                        pass.draw_indexed(
+                            self.pipeline.clone(),
+                            &dynamic,
+                            vertex_buffer,
+                            index_buffer,
+                            (descriptor_set_0.clone(), texture_desc_set),
+                            (),
+                            vec![],
+                        )
+                        .unwrap();
                     }
-
-                    dynamic.scissors = Some(vec![Scissor {
-                        origin: [x as i32, y as i32],
-                        dimensions: [width, height],
-                    }]);
-                    pass.draw_indexed(
-                        self.pipeline.clone(),
-                        &dynamic,
-                        vertex_buffer,
-                        index_buffer,
-                        (descriptor_set_0.clone(), texture_desc_set),
-                        (),
-                        vec![],
-                    )
-                    .unwrap();
                 }
             }
         }
