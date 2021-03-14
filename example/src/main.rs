@@ -132,7 +132,8 @@ fn main() {
     let mut demo_app = egui_demo_lib::WrapApp::default();
     //we want to initialize all framebuffers so we check it true
     let mut recreate_swapchain = true;
-
+    #[cfg(feature = "http")]
+    let http = std::sync::Arc::new(epi_http::EpiHttp {});
     let start_time = Instant::now();
     let mut previous_frame_time = None;
     event_loop.run(move |event, _, control_flow| {
@@ -167,6 +168,8 @@ fn main() {
                         native_pixels_per_point: Some(surface.window().scale_factor() as _),
                     },
                     tex_allocator: &mut egui_render_pass,
+                    #[cfg(feature = "http")]
+                    http: http.clone(),
                     output: &mut app_output,
                     repaint_signal: repaint_signal.clone(),
                 }
