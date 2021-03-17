@@ -69,7 +69,9 @@ pub struct EguiVulkanoRenderPass {
     sampler: Arc<Sampler>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     uniform_buffer_pool: CpuBufferPool<UniformBuffer>,
+    all_indices: Vec<u32>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
+    all_vertices: Vec<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     descriptor_set_0_pool: FixedSizeDescriptorSetsPool,
 }
@@ -116,7 +118,9 @@ impl EguiVulkanoRenderPass {
             sampler,
             frame_buffers: vec![],
             uniform_buffer_pool,
+            all_indices: vec![],
             vertex_buffer_pool,
+            all_vertices: vec![],
             index_buffer_pool,
             descriptor_set_0_pool,
         }
@@ -173,6 +177,8 @@ impl EguiVulkanoRenderPass {
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
     ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
+        self.all_indices.clear();
+        self.all_vertices.clear();
         let framebuffer = if let Some(color_attachment) = color_attachment {
             Arc::new(
                 vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
@@ -229,17 +235,6 @@ impl EguiVulkanoRenderPass {
             reference: None,
         };
 
-        //measure vertices and indices length
-        let mut vert_len = 0;
-        let mut ind_len = 0;
-        for job in paint_jobs.iter() {
-            ind_len += job.1.indices.len();
-            vert_len += job.1.vertices.len();
-        }
-        //allocate all indices and vertices
-
-        let mut all_indices = Vec::with_capacity(ind_len);
-        let mut all_vertices: Vec<EguiVulkanoVertex> = Vec::with_capacity(vert_len);
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
         let mut indices_from = 0;
         let mut vertices_from = 0;
@@ -259,13 +254,14 @@ impl EguiVulkanoRenderPass {
                 println!("Detect glitch mesh");
                 continue;
             }
-            all_indices.extend_from_slice(mesh.indices.as_slice());
-            all_vertices.extend(mesh.vertices.iter().map(|v| unsafe {
-                std::mem::transmute_copy::<egui::paint::Vertex, EguiVulkanoVertex>(v)
-            }));
+            self.all_indices.extend_from_slice(mesh.indices.as_slice());
+            self.all_vertices
+                .extend(mesh.vertices.iter().map(|v| unsafe {
+                    std::mem::transmute_copy::<egui::paint::Vertex, EguiVulkanoVertex>(v)
+                }));
             all_mesh_range.push(Some((
-                indices_from..all_indices.len(),
-                vertices_from..all_vertices.len(),
+                indices_from..self.all_indices.len(),
+                vertices_from..self.all_vertices.len(),
             )));
             indices_from += mesh.indices.len();
             vertices_from += mesh.vertices.len();
@@ -273,11 +269,11 @@ impl EguiVulkanoRenderPass {
         // put data to buffer
         let index_buffer = self
             .index_buffer_pool
-            .chunk(all_indices.iter().cloned())
+            .chunk(self.all_indices.iter().copied())
             .unwrap();
         let vertex_buffer = self
             .vertex_buffer_pool
-            .chunk(all_vertices.iter().cloned())
+            .chunk(self.all_vertices.iter().copied())
             .unwrap();
         #[cfg(debug_assertions)]
         println!("end frame");

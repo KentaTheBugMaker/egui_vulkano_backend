@@ -14,7 +14,8 @@ None
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation
  * skip render glitch mesh (index or vertices empty)
- * reduce uniform buffer and descriptor set allocation( v 0.1.0)
+ * reduce uniform buffer and descriptor set allocation (v0.1.0)
+ * reduce index and vertex buffer allocation (v0.1.0)
 ## Fixed
  * [![glitch image](Screenshot%20from%202021-03-09%2023-48-42.png)](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
 
