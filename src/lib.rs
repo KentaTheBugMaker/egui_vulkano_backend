@@ -8,7 +8,7 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
 use std::sync::Arc;
-use vulkano::buffer::{BufferSlice, BufferUsage, CpuAccessibleBuffer, CpuBufferPool};
+use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
 use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::{FixedSizeDescriptorSetsPool, PersistentDescriptorSet};
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
@@ -68,7 +68,9 @@ pub struct EguiVulkanoRenderPass {
     queue: Arc<Queue>,
     sampler: Arc<Sampler>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-    uniform_buffer: CpuBufferPool<UniformBuffer>,
+    uniform_buffer_pool: CpuBufferPool<UniformBuffer>,
+    vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
+    index_buffer_pool: CpuBufferPool<u32>,
     descriptor_set_0_pool: FixedSizeDescriptorSetsPool,
 }
 
@@ -96,7 +98,9 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
-        let uniform_buffer = CpuBufferPool::uniform_buffer(device.clone());
+        let uniform_buffer_pool = CpuBufferPool::uniform_buffer(device.clone());
+        let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
+        let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
         let descriptor_set_0_pool = FixedSizeDescriptorSetsPool::new(
             pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
         );
@@ -111,7 +115,9 @@ impl EguiVulkanoRenderPass {
 
             sampler,
             frame_buffers: vec![],
-            uniform_buffer,
+            uniform_buffer_pool,
+            vertex_buffer_pool,
+            index_buffer_pool,
             descriptor_set_0_pool,
         }
     }
@@ -180,7 +186,7 @@ impl EguiVulkanoRenderPass {
         };
         let logical = screen_descriptor.logical_size();
         let sub_buffer = self
-            .uniform_buffer
+            .uniform_buffer_pool
             .next(UniformBuffer {
                 _u_screen_size: [logical.0 as f32, logical.1 as f32],
             })
@@ -233,7 +239,7 @@ impl EguiVulkanoRenderPass {
         //allocate all indices and vertices
 
         let mut all_indices = Vec::with_capacity(ind_len);
-        let mut all_vertices = Vec::with_capacity(vert_len);
+        let mut all_vertices: Vec<EguiVulkanoVertex> = Vec::with_capacity(vert_len);
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
         let mut indices_from = 0;
         let mut vertices_from = 0;
@@ -255,11 +261,7 @@ impl EguiVulkanoRenderPass {
             }
             all_indices.extend_from_slice(mesh.indices.as_slice());
             all_vertices.extend(mesh.vertices.iter().map(|v| unsafe {
-                EguiVulkanoVertex {
-                    a_pos: <[f32; 2]>::from(v.pos),
-                    a_tex_coord: <[f32; 2]>::from(v.uv),
-                    a_color: std::mem::transmute(v.color.to_array()),
-                }
+                std::mem::transmute_copy::<egui::paint::Vertex, EguiVulkanoVertex>(v)
             }));
             all_mesh_range.push(Some((
                 indices_from..all_indices.len(),
@@ -268,21 +270,15 @@ impl EguiVulkanoRenderPass {
             indices_from += mesh.indices.len();
             vertices_from += mesh.vertices.len();
         }
-        //create buffer
-        let index_buffer = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::index_buffer(),
-            false,
-            all_indices.iter().cloned(),
-        )
-        .unwrap();
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            BufferUsage::vertex_buffer(),
-            false,
-            all_vertices.iter().cloned(),
-        )
-        .unwrap();
+        // put data to buffer
+        let index_buffer = self
+            .index_buffer_pool
+            .chunk(all_indices.iter().cloned())
+            .unwrap();
+        let vertex_buffer = self
+            .vertex_buffer_pool
+            .chunk(all_vertices.iter().cloned())
+            .unwrap();
         #[cfg(debug_assertions)]
         println!("end frame");
         for (egui::ClippedMesh(clip_rect, mesh), range) in
