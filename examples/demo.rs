@@ -44,8 +44,8 @@ impl epi::RepaintSignal for ExampleRepaintSignal {
     }
 }
 fn main() {
-    // The start of this example is exactly the same as `triangle`. You should read the
-    // `triangle` example if you haven't done so yet.
+    // The start of this examples is exactly the same as `triangle`. You should read the
+    // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(None, &required_extensions, None).unwrap();
@@ -132,7 +132,6 @@ fn main() {
     let mut demo_app = egui_demo_lib::WrapApp::default();
     //we want to initialize all framebuffers so we check it true
     let mut recreate_swapchain = true;
-    #[cfg(feature = "http")]
     let http = std::sync::Arc::new(epi_http::EpiHttp {});
     let start_time = Instant::now();
     let mut previous_frame_time = None;
@@ -168,7 +167,6 @@ fn main() {
                         native_pixels_per_point: Some(surface.window().scale_factor() as _),
                     },
                     tex_allocator: &mut egui_render_pass,
-                    #[cfg(feature = "http")]
                     http: http.clone(),
                     output: &mut app_output,
                     repaint_signal: repaint_signal.clone(),
