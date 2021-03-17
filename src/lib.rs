@@ -8,9 +8,9 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
 use std::sync::Arc;
-use vulkano::buffer::{BufferSlice, BufferUsage, CpuAccessibleBuffer};
+use vulkano::buffer::{BufferSlice, BufferUsage, CpuAccessibleBuffer, CpuBufferPool};
 use vulkano::command_buffer::{AutoCommandBuffer, DynamicState, SubpassContents};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::descriptor::descriptor_set::{FixedSizeDescriptorSetsPool, PersistentDescriptorSet};
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
@@ -68,6 +68,8 @@ pub struct EguiVulkanoRenderPass {
     queue: Arc<Queue>,
     sampler: Arc<Sampler>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    uniform_buffer: CpuBufferPool<UniformBuffer>,
+    descriptor_set_0_pool: FixedSizeDescriptorSetsPool,
 }
 
 impl EguiVulkanoRenderPass {
@@ -94,6 +96,11 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
+        let uniform_buffer = CpuBufferPool::uniform_buffer(device.clone());
+        let descriptor_set_0_pool = FixedSizeDescriptorSetsPool::new(
+            pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
+        );
+
         Self {
             pipeline,
             egui_texture_descriptor_set: None,
@@ -104,6 +111,8 @@ impl EguiVulkanoRenderPass {
 
             sampler,
             frame_buffers: vec![],
+            uniform_buffer,
+            descriptor_set_0_pool,
         }
     }
 
@@ -152,7 +161,7 @@ impl EguiVulkanoRenderPass {
     ///
     /// If color attachment is some then render to any image e.g. AttachmentImage StorageImage
     pub fn create_command_buffer(
-        &self,
+        &mut self,
         color_attachment: Option<Arc<dyn ImageViewAccess + Send + Sync>>,
         image_num: Option<usize>,
         paint_jobs: &[ClippedMesh],
@@ -170,29 +179,21 @@ impl EguiVulkanoRenderPass {
             self.frame_buffers[image_num.unwrap()].clone()
         };
         let logical = screen_descriptor.logical_size();
-        let uniform = CpuAccessibleBuffer::from_data(
-            self.device.clone(),
-            BufferUsage::uniform_buffer(),
-            false,
-            UniformBuffer {
+        let sub_buffer = self
+            .uniform_buffer
+            .next(UniformBuffer {
                 _u_screen_size: [logical.0 as f32, logical.1 as f32],
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         let descriptor_set_0 = Arc::new(
-            PersistentDescriptorSet::start(
-                self.pipeline
-                    .layout()
-                    .descriptor_set_layout(0)
-                    .unwrap()
-                    .clone(),
-            )
-            .add_buffer(uniform)
-            .unwrap()
-            .add_sampler(self.sampler.clone())
-            .unwrap()
-            .build()
-            .unwrap(),
+            self.descriptor_set_0_pool
+                .next()
+                .add_buffer(sub_buffer)
+                .unwrap()
+                .add_sampler(self.sampler.clone())
+                .unwrap()
+                .build()
+                .unwrap(),
         );
 
         let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
@@ -211,17 +212,17 @@ impl EguiVulkanoRenderPass {
         let physical_width = screen_descriptor.physical_width;
         let mut dynamic = DynamicState {
             line_width: None,
-            viewports: None,
+            viewports: Some(vec![Viewport {
+                origin: [0.0; 2],
+                dimensions: [physical_width as f32, physical_height as f32],
+                depth_range: Default::default(),
+            }]),
             scissors: None,
             compare_mask: None,
             write_mask: None,
             reference: None,
         };
-        dynamic.viewports = Some(vec![Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [physical_width as f32, physical_height as f32],
-            depth_range: Default::default(),
-        }]);
+
         //measure vertices and indices length
         let mut vert_len = 0;
         let mut ind_len = 0;
@@ -238,11 +239,11 @@ impl EguiVulkanoRenderPass {
         let mut vertices_from = 0;
         #[cfg(debug_assertions)]
         println!("start frame");
-        for (i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
+        for (_i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
             #[cfg(debug_assertions)]
             println!(
                 "mesh {} vertices {} indices {}",
-                i,
+                _i,
                 mesh.vertices.len(),
                 mesh.indices.len()
             );
@@ -293,7 +294,7 @@ impl EguiVulkanoRenderPass {
                 //mesh to index and vertex buffer
 
                 let texture_id = mesh.texture_id;
-                let texture_descriptor = self.get_descriptor(texture_id);
+                let texture_descriptor = self.get_descriptor_set(texture_id);
                 //emit valid texturing
                 if let Some(texture_desc_set) = texture_descriptor {
                     let index_buffer = BufferSlice::from_typed_buffer_access(index_buffer.clone())
@@ -383,7 +384,7 @@ impl EguiVulkanoRenderPass {
         let image_view = image.0 as Arc<dyn ImageViewAccess + Sync + Send>;
         let pipeline = self.pipeline.clone();
         self.egui_texture_descriptor_set =
-            Some(Self::create_texture_binding_from_view(pipeline, image_view));
+            Some(Self::create_descriptor_set_from_view(pipeline, image_view));
         self.egui_texture_version = Some(texture.version);
     }
     fn alloc_user_texture(&mut self) -> TextureId {
@@ -399,6 +400,8 @@ impl EguiVulkanoRenderPass {
     }
     fn free_user_texture(&mut self, id: TextureId) {
         if let TextureId::User(id) = id {
+            #[cfg(debug_assertions)]
+            println!("free {}", id);
             self.user_textures
                 .get_mut(id as usize)
                 .and_then(|option| option.take());
@@ -430,7 +433,7 @@ impl EguiVulkanoRenderPass {
                     .unwrap();
                     future.flush().unwrap();
                     let image_view = image as Arc<dyn ImageViewAccess + Sync + Send>;
-                    user_texture.descriptor_set = Some(Self::create_texture_binding_from_view(
+                    user_texture.descriptor_set = Some(Self::create_descriptor_set_from_view(
                         pipeline.clone(),
                         image_view,
                     ));
@@ -438,7 +441,7 @@ impl EguiVulkanoRenderPass {
             }
         }
     }
-    fn create_texture_binding_from_view(
+    fn create_descriptor_set_from_view(
         pipeline: Arc<Pipeline>,
         image_view: Arc<dyn ImageViewAccess + Sync + Send>,
     ) -> Arc<dyn DescriptorSet + Send + Sync> {
@@ -452,7 +455,7 @@ impl EguiVulkanoRenderPass {
             .unwrap(),
         )
     }
-    fn get_descriptor(
+    fn get_descriptor_set(
         &self,
         texture_id: TextureId,
     ) -> Option<Arc<dyn DescriptorSet + Send + Sync>> {
@@ -494,10 +497,11 @@ impl EguiVulkanoRenderPass {
             }
         }
     }
-    /// mark vulkano image view as egui texture id
-    /// enables fast and easy off-screen rendering
+    /// register vulkano image view as egui texture
+    ///
+    /// Usable for render to image rectangle
 
-    pub fn vulkano_texture_as_egui(
+    pub fn register_vulkano_texture(
         &mut self,
         image_view: Arc<dyn ImageViewAccess + Sync + Send>,
     ) -> TextureId {
@@ -509,7 +513,7 @@ impl EguiVulkanoRenderPass {
                 *slot = Some(UserTexture {
                     pixels: vec![],
                     size: [dimension.width(), dimension.height()],
-                    descriptor_set: Some(Self::create_texture_binding_from_view(
+                    descriptor_set: Some(Self::create_descriptor_set_from_view(
                         pipeline, image_view,
                     )),
                 });
