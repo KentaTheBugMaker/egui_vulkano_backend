@@ -179,6 +179,7 @@ impl EguiVulkanoRenderPass {
     ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
         self.all_indices.clear();
         self.all_vertices.clear();
+
         let framebuffer = if let Some(color_attachment) = color_attachment {
             Arc::new(
                 vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
@@ -219,7 +220,7 @@ impl EguiVulkanoRenderPass {
             vec![[0.0, 0.0, 0.0, 0.0].into()],
         )
         .unwrap();
-        let scale_factor = screen_descriptor.scale_factor;
+
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
         let mut dynamic = DynamicState {
@@ -236,11 +237,15 @@ impl EguiVulkanoRenderPass {
         };
 
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
+        let clip_rectangles = paint_jobs.iter().map(|x| x.0);
+        let scissors = skip_by_clip(screen_descriptor, clip_rectangles);
         let mut indices_from = 0;
         let mut vertices_from = 0;
         #[cfg(debug_assertions)]
         println!("start frame");
-        for (_i, egui::ClippedMesh(_, mesh)) in paint_jobs.iter().enumerate() {
+        for ((_i, egui::ClippedMesh(_, mesh)), scissor) in
+            paint_jobs.iter().enumerate().zip(scissors.clone())
+        {
             #[cfg(debug_assertions)]
             println!(
                 "mesh {} vertices {} indices {}",
@@ -248,37 +253,43 @@ impl EguiVulkanoRenderPass {
                 mesh.vertices.len(),
                 mesh.indices.len()
             );
-            if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+            if mesh.vertices.is_empty() || mesh.indices.is_empty() | scissor.is_none() {
                 all_mesh_range.push(None);
                 #[cfg(debug_assertions)]
                 println!("Detect glitch mesh");
                 continue;
             }
             self.all_indices.extend_from_slice(mesh.indices.as_slice());
-            self.all_vertices
-                .extend(mesh.vertices.iter().map(|v| unsafe {
-                    std::mem::transmute_copy::<egui::paint::Vertex, EguiVulkanoVertex>(v)
-                }));
+
+            self.all_vertices.extend(unsafe {
+                std::mem::transmute::<&[egui::epaint::Vertex], &[EguiVulkanoVertex]>(
+                    mesh.vertices.as_slice(),
+                )
+            });
+            let indices_len = mesh.indices.len();
+            let vertices_len = mesh.vertices.len();
             all_mesh_range.push(Some((
                 indices_from..self.all_indices.len(),
                 vertices_from..self.all_vertices.len(),
             )));
-            indices_from += mesh.indices.len();
-            vertices_from += mesh.vertices.len();
+            indices_from += indices_len;
+            vertices_from += vertices_len;
         }
         // put data to buffer
         let index_buffer = self
             .index_buffer_pool
             .chunk(self.all_indices.iter().copied())
             .unwrap();
+
         let vertex_buffer = self
             .vertex_buffer_pool
             .chunk(self.all_vertices.iter().copied())
             .unwrap();
+
         #[cfg(debug_assertions)]
         println!("end frame");
-        for (egui::ClippedMesh(clip_rect, mesh), range) in
-            paint_jobs.iter().zip(all_mesh_range.iter())
+        for ((egui::ClippedMesh(_, mesh), range), scissor) in
+            paint_jobs.iter().zip(all_mesh_range.iter()).zip(scissors)
         {
             if let Some(range) = range {
                 let index_range = range.0.clone();
@@ -288,58 +299,29 @@ impl EguiVulkanoRenderPass {
                 let texture_id = mesh.texture_id;
                 let texture_descriptor = self.get_descriptor_set(texture_id);
                 //emit valid texturing
-                if let Some(texture_desc_set) = texture_descriptor {
-                    let index_buffer = BufferSlice::from_typed_buffer_access(index_buffer.clone())
-                        .slice(index_range)
-                        .unwrap();
-                    let vertex_buffer =
-                        BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
-                            .slice(vertex_range)
+                if scissor.is_some() {
+                    if let Some(texture_desc_set) = texture_descriptor {
+                        let index_buffer =
+                            BufferSlice::from_typed_buffer_access(index_buffer.clone())
+                                .slice(index_range)
+                                .unwrap();
+                        let vertex_buffer =
+                            BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
+                                .slice(vertex_range)
+                                .unwrap();
+                        {
+                            dynamic.scissors = Some(vec![scissor.unwrap()]);
+                            pass.draw_indexed(
+                                self.pipeline.clone(),
+                                &dynamic,
+                                vertex_buffer,
+                                index_buffer,
+                                (descriptor_set_0.clone(), texture_desc_set),
+                                (),
+                                vec![],
+                            )
                             .unwrap();
-                    // Transform clip rect to physical pixels.
-                    let clip_min_x = scale_factor * clip_rect.min.x;
-                    let clip_min_y = scale_factor * clip_rect.min.y;
-                    let clip_max_x = scale_factor * clip_rect.max.x;
-                    let clip_max_y = scale_factor * clip_rect.max.y;
-
-                    // Make sure clip rect can fit within an `u32`.
-                    let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
-                    let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
-                    let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
-                    let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
-
-                    let clip_min_x = clip_min_x.round() as u32;
-                    let clip_min_y = clip_min_y.round() as u32;
-                    let clip_max_x = clip_max_x.round() as u32;
-                    let clip_max_y = clip_max_y.round() as u32;
-
-                    let width = (clip_max_x - clip_min_x).max(1);
-                    let height = (clip_max_y - clip_min_y).max(1);
-                    {
-                        // clip scissor rectangle to target size
-                        let x = clip_min_x.min(physical_width);
-                        let y = clip_min_y.min(physical_height);
-                        let width = width.min(physical_width - x);
-                        let height = height.min(physical_height - y);
-                        // skip rendering with zero-sized clip areas
-                        if width == 0 || height == 0 {
-                            continue;
                         }
-
-                        dynamic.scissors = Some(vec![Scissor {
-                            origin: [x as i32, y as i32],
-                            dimensions: [width, height],
-                        }]);
-                        pass.draw_indexed(
-                            self.pipeline.clone(),
-                            &dynamic,
-                            vertex_buffer,
-                            index_buffer,
-                            (descriptor_set_0.clone(), texture_desc_set),
-                            (),
-                            vec![],
-                        )
-                        .unwrap();
                     }
                 }
             }
@@ -528,13 +510,14 @@ impl epi::TextureAllocator for EguiVulkanoRenderPass {
         self.free_user_texture(id)
     }
 }
-fn skip_by_clip(screen_desc:&ScreenDescriptor,clip_rectangles:&[egui::Rect])->Vec<Option<Scissor>>{
-    let mut scissors=vec![];
-    let scale_factor= screen_desc.scale_factor;
-    let physical_width=screen_desc.physical_width;
-    let physical_height=screen_desc.physical_height;
-
-    for clip_rect in clip_rectangles{
+fn skip_by_clip(
+    screen_desc: &ScreenDescriptor,
+    clip_rectangles: impl Iterator<Item = egui::Rect> + Clone,
+) -> impl Iterator<Item = Option<Scissor>> + Clone {
+    let scale_factor = screen_desc.scale_factor;
+    let physical_width = screen_desc.physical_width;
+    let physical_height = screen_desc.physical_height;
+    clip_rectangles.map(move |clip_rect| {
         // Transform clip rect to physical pixels.
         let clip_min_x = scale_factor * clip_rect.min.x;
         let clip_min_y = scale_factor * clip_rect.min.y;
@@ -542,10 +525,10 @@ fn skip_by_clip(screen_desc:&ScreenDescriptor,clip_rectangles:&[egui::Rect])->Ve
         let clip_max_y = scale_factor * clip_rect.max.y;
 
         // Make sure clip rect can fit within an `u32`.
-        let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
-        let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
-        let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
-        let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
+        let clip_min_x = clip_min_x.clamp(0.0, physical_width as f32);
+        let clip_min_y = clip_min_y.clamp(0.0, physical_height as f32);
+        let clip_max_x = clip_max_x.clamp(clip_min_x, physical_width as f32);
+        let clip_max_y = clip_max_y.clamp(clip_min_y, physical_height as f32);
 
         let clip_min_x = clip_min_x.round() as u32;
         let clip_min_y = clip_min_y.round() as u32;
@@ -561,12 +544,14 @@ fn skip_by_clip(screen_desc:&ScreenDescriptor,clip_rectangles:&[egui::Rect])->Ve
         let height = height.min(physical_height - y);
         // skip rendering with zero-sized clip areas
         if width == 0 || height == 0 {
-            scissors.push(None)
-        }else {
-            scissors.push(Some(Scissor{ origin: [x as i32,y as i32], dimensions: [width,height] }))
+            None
+        } else {
+            Some(Scissor {
+                origin: [x as i32, y as i32],
+                dimensions: [width, height],
+            })
         }
-    }
-    scissors
+    })
 }
 #[derive(Default)]
 struct UserTexture {
