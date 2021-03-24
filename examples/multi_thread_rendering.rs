@@ -211,7 +211,7 @@ fn main() {
                 demo_app.update(&platform.context(), &mut frame);
 
                 // End the UI frame. We could now handle the output and draw the UI with the backend.
-                let (_output, paint_commands) = platform.end_frame();
+                let (output, paint_commands) = platform.end_frame();
                 let paint_jobs = platform.context().tessellate(paint_commands);
 
                 let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
@@ -261,16 +261,22 @@ fn main() {
                     &screen_descriptor,
                 );
                 tx.send((render_command, acquire_future)).unwrap();
-
+                let epi::backend::AppOutput { quit, window_size } = app_output;
+                *control_flow = if quit {
+                    ControlFlow::Exit
+                } else if output.needs_repaint {
+                    surface.window().request_redraw();
+                    ControlFlow::Poll
+                } else {
+                    ControlFlow::Wait
+                };
                 //    egui_render_pass.present_to_screen(render_command, acquire_future);
                 *control_flow = ControlFlow::Poll
             }
             Event::UserEvent(_) => {
                 surface.window().request_redraw();
-                *control_flow = ControlFlow::Poll
             }
-            Event::LoopDestroyed => {}
-            _ => *control_flow = ControlFlow::Poll,
+            _ => (),
         }
     });
 }

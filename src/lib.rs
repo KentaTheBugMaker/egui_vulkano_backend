@@ -260,7 +260,7 @@ impl EguiVulkanoRenderPass {
                 continue;
             }
             self.all_indices.extend_from_slice(mesh.indices.as_slice());
-
+            #[allow(clippy::transmute_ptr_to_ptr)]
             self.all_vertices.extend(unsafe {
                 std::mem::transmute::<&[egui::epaint::Vertex], &[EguiVulkanoVertex]>(
                     mesh.vertices.as_slice(),
