@@ -528,7 +528,46 @@ impl epi::TextureAllocator for EguiVulkanoRenderPass {
         self.free_user_texture(id)
     }
 }
+fn skip_by_clip(screen_desc:&ScreenDescriptor,clip_rectangles:&[egui::Rect])->Vec<Option<Scissor>>{
+    let mut scissors=vec![];
+    let scale_factor= screen_desc.scale_factor;
+    let physical_width=screen_desc.physical_width;
+    let physical_height=screen_desc.physical_height;
 
+    for clip_rect in clip_rectangles{
+        // Transform clip rect to physical pixels.
+        let clip_min_x = scale_factor * clip_rect.min.x;
+        let clip_min_y = scale_factor * clip_rect.min.y;
+        let clip_max_x = scale_factor * clip_rect.max.x;
+        let clip_max_y = scale_factor * clip_rect.max.y;
+
+        // Make sure clip rect can fit within an `u32`.
+        let clip_min_x = egui::clamp(clip_min_x, 0.0..=physical_width as f32);
+        let clip_min_y = egui::clamp(clip_min_y, 0.0..=physical_height as f32);
+        let clip_max_x = egui::clamp(clip_max_x, clip_min_x..=physical_width as f32);
+        let clip_max_y = egui::clamp(clip_max_y, clip_min_y..=physical_height as f32);
+
+        let clip_min_x = clip_min_x.round() as u32;
+        let clip_min_y = clip_min_y.round() as u32;
+        let clip_max_x = clip_max_x.round() as u32;
+        let clip_max_y = clip_max_y.round() as u32;
+
+        let width = (clip_max_x - clip_min_x).max(1);
+        let height = (clip_max_y - clip_min_y).max(1);
+        // clip scissor rectangle to target size
+        let x = clip_min_x.min(physical_width);
+        let y = clip_min_y.min(physical_height);
+        let width = width.min(physical_width - x);
+        let height = height.min(physical_height - y);
+        // skip rendering with zero-sized clip areas
+        if width == 0 || height == 0 {
+            scissors.push(None)
+        }else {
+            scissors.push(Some(Scissor{ origin: [x as i32,y as i32], dimensions: [width,height] }))
+        }
+    }
+    scissors
+}
 #[derive(Default)]
 struct UserTexture {
     pixels: Vec<u8>,

@@ -14,6 +14,7 @@ None
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation
  * skip render glitch mesh (index or vertices empty)
+ * skip render 0 size mesh(v0.1.1) 
  * reduce uniform buffer and descriptor set allocation (v0.1.0)
  * reduce index and vertex buffer allocation (v0.1.0)
 ## Fixed
