@@ -74,6 +74,7 @@ pub struct EguiVulkanoRenderPass {
     all_vertices: Vec<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     descriptor_set_0_pool: FixedSizeDescriptorSetsPool,
+    dynamic:DynamicState,
 }
 
 impl EguiVulkanoRenderPass {
@@ -123,6 +124,7 @@ impl EguiVulkanoRenderPass {
             all_vertices: vec![],
             index_buffer_pool,
             descriptor_set_0_pool,
+            dynamic: Default::default()
         }
     }
 
@@ -223,18 +225,12 @@ impl EguiVulkanoRenderPass {
 
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
-        let mut dynamic = DynamicState {
-            line_width: None,
-            viewports: Some(vec![Viewport {
-                origin: [0.0; 2],
-                dimensions: [physical_width as f32, physical_height as f32],
-                depth_range: Default::default(),
-            }]),
-            scissors: None,
-            compare_mask: None,
-            write_mask: None,
-            reference: None,
-        };
+
+        self.dynamic.viewports=Some(vec![Viewport{
+            origin:[0.0;2],
+            dimensions:[physical_width as f32,physical_height as f32],
+            depth_range:Default::default()
+        }]);
 
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
         let clip_rectangles = paint_jobs.iter().map(|x| x.0);
@@ -310,10 +306,10 @@ impl EguiVulkanoRenderPass {
                                 .slice(vertex_range)
                                 .unwrap();
                         {
-                            dynamic.scissors = Some(vec![scissor.unwrap()]);
+                            self.dynamic.scissors = Some(vec![scissor.unwrap()]);
                             pass.draw_indexed(
                                 self.pipeline.clone(),
-                                &dynamic,
+                                &self.dynamic,
                                 vertex_buffer,
                                 index_buffer,
                                 (descriptor_set_0.clone(), texture_desc_set),
@@ -364,7 +360,6 @@ impl EguiVulkanoRenderPass {
     fn alloc_user_texture(&mut self) -> TextureId {
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
-                *tex = Some(Default::default());
                 return TextureId::User(i as u64);
             }
         }
@@ -378,7 +373,7 @@ impl EguiVulkanoRenderPass {
             println!("free {}", id);
             self.user_textures
                 .get_mut(id as usize)
-                .and_then(|option| option.take());
+                .and_then(|option:&mut Option<UserTexture>| option.take());
         }
     }
     /// egui use lazy texture allocating so you must call before every create_command_buffer.
