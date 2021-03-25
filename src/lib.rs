@@ -21,6 +21,7 @@ use crate::shader::create_pipeline;
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::framebuffer::Framebuffer;
 
+use iter_vec::ExactSizedIterVec;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
@@ -69,12 +70,10 @@ pub struct EguiVulkanoRenderPass {
     sampler: Arc<Sampler>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     uniform_buffer_pool: CpuBufferPool<UniformBuffer>,
-    all_indices: Vec<u32>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
-    all_vertices: Vec<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     descriptor_set_0_pool: FixedSizeDescriptorSetsPool,
-    dynamic:DynamicState,
+    dynamic: DynamicState,
 }
 
 impl EguiVulkanoRenderPass {
@@ -119,12 +118,10 @@ impl EguiVulkanoRenderPass {
             sampler,
             frame_buffers: vec![],
             uniform_buffer_pool,
-            all_indices: vec![],
             vertex_buffer_pool,
-            all_vertices: vec![],
             index_buffer_pool,
             descriptor_set_0_pool,
-            dynamic: Default::default()
+            dynamic: Default::default(),
         }
     }
 
@@ -179,9 +176,8 @@ impl EguiVulkanoRenderPass {
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
     ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
-        self.all_indices.clear();
-        self.all_vertices.clear();
-
+        let mut exact_sized_iter_vec_vertices = ExactSizedIterVec::new();
+        let mut exact_sized_iter_vec_indices = ExactSizedIterVec::new();
         let framebuffer = if let Some(color_attachment) = color_attachment {
             Arc::new(
                 vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
@@ -226,10 +222,10 @@ impl EguiVulkanoRenderPass {
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
 
-        self.dynamic.viewports=Some(vec![Viewport{
-            origin:[0.0;2],
-            dimensions:[physical_width as f32,physical_height as f32],
-            depth_range:Default::default()
+        self.dynamic.viewports = Some(vec![Viewport {
+            origin: [0.0; 2],
+            dimensions: [physical_width as f32, physical_height as f32],
+            depth_range: Default::default(),
         }]);
 
         let mut all_mesh_range = Vec::with_capacity(paint_jobs.len());
@@ -255,33 +251,31 @@ impl EguiVulkanoRenderPass {
                 println!("Detect glitch mesh");
                 continue;
             }
-            self.all_indices.extend_from_slice(mesh.indices.as_slice());
+            exact_sized_iter_vec_indices.push(mesh.indices.as_slice());
             #[allow(clippy::transmute_ptr_to_ptr)]
-            self.all_vertices.extend(unsafe {
-                std::mem::transmute::<&[egui::epaint::Vertex], &[EguiVulkanoVertex]>(
-                    mesh.vertices.as_slice(),
-                )
-            });
+            exact_sized_iter_vec_vertices
+                .push(unsafe { std::mem::transmute(mesh.vertices.as_slice()) });
+
             let indices_len = mesh.indices.len();
             let vertices_len = mesh.vertices.len();
+            let indices_end = indices_from + indices_len;
+            let vertices_end = vertices_from + vertices_len;
             all_mesh_range.push(Some((
-                indices_from..self.all_indices.len(),
-                vertices_from..self.all_vertices.len(),
+                indices_from..indices_end,
+                vertices_from..vertices_end,
             )));
-            indices_from += indices_len;
-            vertices_from += vertices_len;
+            indices_from = indices_end;
+            vertices_from = vertices_end;
         }
         // put data to buffer
         let index_buffer = self
             .index_buffer_pool
-            .chunk(self.all_indices.iter().copied())
+            .chunk(exact_sized_iter_vec_indices.copied())
             .unwrap();
-
         let vertex_buffer = self
             .vertex_buffer_pool
-            .chunk(self.all_vertices.iter().copied())
+            .chunk(exact_sized_iter_vec_vertices.copied())
             .unwrap();
-
         #[cfg(debug_assertions)]
         println!("end frame");
         for ((egui::ClippedMesh(_, mesh), range), scissor) in
@@ -373,7 +367,7 @@ impl EguiVulkanoRenderPass {
             println!("free {}", id);
             self.user_textures
                 .get_mut(id as usize)
-                .and_then(|option:&mut Option<UserTexture>| option.take());
+                .and_then(|option: &mut Option<UserTexture>| option.take());
         }
     }
     /// egui use lazy texture allocating so you must call before every create_command_buffer.
