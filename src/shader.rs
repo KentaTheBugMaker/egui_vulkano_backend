@@ -16,11 +16,11 @@ use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterfaceDef, ShaderInterfaceDefEntry, ShaderModule,
 };
 
-struct VSInterfaceIn;
-struct VSInterfaceOut;
-struct FSInterfaceIn;
-struct FSInterfaceOut;
-unsafe impl ShaderInterfaceDef for VSInterfaceIn {
+struct VsInterfaceIn;
+struct VsInterfaceOut;
+struct FsInterfaceIn;
+struct FsInterfaceOut;
+unsafe impl ShaderInterfaceDef for VsInterfaceIn {
     type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
 
     fn elements(&self) -> Self::Iter {
@@ -47,7 +47,7 @@ unsafe impl ShaderInterfaceDef for VSInterfaceIn {
         )
     }
 }
-unsafe impl ShaderInterfaceDef for VSInterfaceOut {
+unsafe impl ShaderInterfaceDef for VsInterfaceOut {
     type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
 
     fn elements(&self) -> Self::Iter {
@@ -69,7 +69,7 @@ unsafe impl ShaderInterfaceDef for VSInterfaceOut {
         )
     }
 }
-unsafe impl ShaderInterfaceDef for FSInterfaceIn {
+unsafe impl ShaderInterfaceDef for FsInterfaceIn {
     type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
 
     fn elements(&self) -> Self::Iter {
@@ -91,7 +91,7 @@ unsafe impl ShaderInterfaceDef for FSInterfaceIn {
         )
     }
 }
-unsafe impl ShaderInterfaceDef for FSInterfaceOut {
+unsafe impl ShaderInterfaceDef for FsInterfaceOut {
     type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
 
     fn elements(&self) -> Self::Iter {
@@ -201,8 +201,8 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     let vs_entry = unsafe {
         vs_module.graphics_entry_point(
             &main,
-            VSInterfaceIn,
-            VSInterfaceOut,
+            VsInterfaceIn,
+            VsInterfaceOut,
             PipelineLayout,
             GraphicsShaderType::Vertex,
         )
@@ -210,8 +210,8 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     let fs_entry = unsafe {
         fs_module.graphics_entry_point(
             &main,
-            FSInterfaceIn,
-            FSInterfaceOut,
+            FsInterfaceIn,
+            FsInterfaceOut,
             PipelineLayout,
             GraphicsShaderType::Fragment,
         )
