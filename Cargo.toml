@@ -1,6 +1,6 @@
 [package]
 name = "egui_vulkano_backend"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
 license="MIT OR Apache-2.0"
@@ -14,7 +14,6 @@ readme = "README.md"
 vulkano = "^0.21.0"
 epi = "0.10.0"
 iter_vec ="0.1"
-bytemuck="1.5"
 [dev-dependencies]
 egui_winit_platform = "0.5.0"
 epi_http={version="0.10.0"}
