@@ -14,7 +14,9 @@ None
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation
  * skip render glitch mesh (index or vertices empty)
- * faster system texture upload(v0.2.0)  
+ * rename api(v0.2.0)
+   * upload_egui_texture -> request_upload_egui_texture
+   * upload_pending_textures -> wait_texture_upload 
  * nonblocking image upload(v0.2.0) 
  * remove temporary index and vertex alloc(v0.2.0)  
  * skip render 0 size mesh(v0.2.0) 
