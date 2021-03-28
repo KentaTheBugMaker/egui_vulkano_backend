@@ -113,7 +113,6 @@ fn main() {
     //create renderer
     let mut egui_render_pass =
         egui_vulkano_backend::EguiVulkanoRenderPass::new(device.clone(), queue, swapchain.format());
-
     //init egui
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),

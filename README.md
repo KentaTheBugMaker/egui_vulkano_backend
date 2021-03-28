@@ -14,13 +14,13 @@ None
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation
  * skip render glitch mesh (index or vertices empty)
+ * nonblocking image upload(v0.1.1) 
  * remove temporary index and vertex alloc(v0.1.1)  
  * skip render 0 size mesh(v0.1.1) 
  * reduce uniform buffer and descriptor set allocation (v0.1.0)
- * reduce index and vertex buffer allocation (v0.1.0)
+ * reduce  index and vertex buffer allocation (v0.1.0)
 ## Fixed
- * [![glitch image](Screenshot%20from%202021-03-09%2023-48-42.png)](https://github.com/t18b219k/egui_vulkano_backend/issues/1)
-
+ * doesn't pass color test
  * change tab in sample at debug build cause crash.
 ## Example
 We have created [a simple example](https://github.com/t18b219k/egui_vulkano_backend/tree/master/examples/demo.rs) project to show you, how to use this crate.
