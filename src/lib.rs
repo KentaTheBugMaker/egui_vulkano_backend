@@ -90,12 +90,17 @@ pub struct EguiVulkanoRenderPass {
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
+    image_staging_buffer: CpuBufferPool<u8>,
     descriptor_set_0: Arc<dyn DescriptorSet + Send + Sync>,
     dynamic: DynamicState,
     image_transfer_request_list: Vec<TextureId>,
     request_sender: Sender<Work>,
     done_notifier: Receiver<TextureId>,
 }
+type Work = (
+    TextureId,
+    CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
+);
 fn spawn_image_upload_thread() -> (Sender<Work>, Receiver<TextureId>) {
     let (tx, rx): (Sender<Work>, Receiver<Work>) = std::sync::mpsc::channel();
     let (notifier, getter) = std::sync::mpsc::channel();
@@ -108,12 +113,6 @@ fn spawn_image_upload_thread() -> (Sender<Work>, Receiver<TextureId>) {
     });
     (tx, getter)
 }
-
-type Work = (
-    TextureId,
-    CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
-);
-
 impl EguiVulkanoRenderPass {
     ///create command builder
     ///
@@ -141,7 +140,8 @@ impl EguiVulkanoRenderPass {
 
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
-
+        let image_staging_buffer =
+            CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
         let (request_sender, done_notifier) = spawn_image_upload_thread();
         let descriptor_set_0 = Arc::new(
             PersistentDescriptorSet::start(
@@ -178,6 +178,7 @@ impl EguiVulkanoRenderPass {
             frame_buffers: vec![],
             vertex_buffer_pool,
             index_buffer_pool,
+            image_staging_buffer,
             descriptor_set_0,
             dynamic: Default::default(),
 
@@ -381,8 +382,12 @@ impl EguiVulkanoRenderPass {
             return;
         }
         let format = vulkano::format::Format::R8Unorm;
-        let image = vulkano::image::ImmutableImage::from_iter(
-            texture.pixels.iter().cloned(),
+        let staging_sub_buffer = self
+            .image_staging_buffer
+            .chunk(texture.pixels.iter().copied())
+            .unwrap();
+        let image = vulkano::image::ImmutableImage::from_buffer(
+            staging_sub_buffer,
             Dimensions::Dim2d {
                 width: texture.width as u32,
                 height: texture.height as u32,
@@ -493,8 +498,12 @@ impl EguiVulkanoRenderPass {
                         srgba_pixels.len() * 4,
                     )
                 };
-                let (image, future) = vulkano::image::ImmutableImage::from_iter(
-                    pixels.iter().copied(),
+                let sub_buffer = self
+                    .image_staging_buffer
+                    .chunk(pixels.iter().copied())
+                    .unwrap();
+                let (image, future) = vulkano::image::ImmutableImage::from_buffer(
+                    sub_buffer,
                     Dimensions::Dim2d {
                         width: size.0 as u32,
                         height: size.1 as u32,

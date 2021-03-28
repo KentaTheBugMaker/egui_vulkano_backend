@@ -11,6 +11,7 @@ this crate rendering only you need I/O egui integration e.g. [egui_winit_platfor
 ## known bug 
 None
 ## Update 
+ * reduce crate size(v0.2.3)
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation
  * skip render glitch mesh (index or vertices empty)
@@ -33,7 +34,7 @@ cargo run --example demo
 ## License
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
 
-See [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT).
+See [LICENSE-APACHE](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-APACHE), [LICENSE-MIT](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-MIT).
 ## Credits
  * egui_wgpu_backend developers
  * egui_winit_platform developers
