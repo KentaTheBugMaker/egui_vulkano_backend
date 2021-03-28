@@ -1,7 +1,9 @@
 #version 450
 //glslangValidator shader.vert -V -o vert.spv
-layout(set = 0, binding = 0) uniform UniformBuffer {
+
+layout(push_constant) uniform UniformBuffer {
     vec2 u_screen_size;
+    bool is_egui_system_texture;
 };
 layout(location = 0) in vec2 a_pos;//R32G32SFloat
 layout(location = 1) in vec2 a_tex_coord;//R32G32SFloat

@@ -117,7 +117,7 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
         if set == 1 {
             Some(1)
         } else if set == 0 {
-            Some(2)
+            Some(1)
         } else {
             None
         }
@@ -126,23 +126,6 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
     fn descriptor(&self, set: usize, binding: usize) -> Option<DescriptorDesc> {
         if set == 0 {
             if binding == 0 {
-                Some(DescriptorDesc {
-                    ty: DescriptorDescTy::Buffer(DescriptorBufferDesc {
-                        dynamic: None,
-                        storage: false,
-                    }),
-                    array_count: 1,
-                    stages: ShaderStages {
-                        vertex: true,
-                        tessellation_control: false,
-                        tessellation_evaluation: false,
-                        geometry: false,
-                        fragment: false,
-                        compute: false,
-                    },
-                    readonly: true,
-                })
-            } else if binding == 1 {
                 Some(DescriptorDesc {
                     ty: DescriptorDescTy::Sampler,
                     array_count: 1,
@@ -156,7 +139,7 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
                     },
                     readonly: true,
                 })
-            } else {
+            }else {
                 None
             }
         } else if set == 1 {
@@ -180,7 +163,7 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
                     },
                     readonly: true,
                 })
-            } else {
+            }else{
                 None
             }
         } else {
@@ -189,11 +172,26 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
     }
 
     fn num_push_constants_ranges(&self) -> usize {
-        0
+        1
     }
 
-    fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
-        None
+    fn push_constants_range(&self, num: usize) -> Option<PipelineLayoutDescPcRange> {
+        if num==0{
+            Some(PipelineLayoutDescPcRange{
+                offset: 0,
+                size: 12,
+                stages: ShaderStages {
+                    vertex: true,
+                    tessellation_control: false,
+                    tessellation_evaluation: false,
+                    geometry: false,
+                    fragment: true,
+                    compute: false
+                }
+            })
+        }else{
+            None
+        }
     }
 }
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {

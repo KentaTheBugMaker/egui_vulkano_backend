@@ -12,7 +12,7 @@ use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
 use vulkano::command_buffer::{
     AutoCommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
 };
-use vulkano::descriptor::descriptor_set::{FixedSizeDescriptorSetsPool, PersistentDescriptorSet};
+use vulkano::descriptor::descriptor_set::{ PersistentDescriptorSet};
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
@@ -39,8 +39,14 @@ struct EguiVulkanoVertex {
     a_tex_coord: [f32; 2],
     a_color: u32,
 }
-struct UniformBuffer {
-    _u_screen_size: [f32; 2],
+
+struct IsEguiTextureMarker(u32);
+const IS_EGUI:IsEguiTextureMarker=IsEguiTextureMarker(1);
+const IS_USER:IsEguiTextureMarker=IsEguiTextureMarker(0);
+#[repr(C)]
+struct PushConstants{
+    u_screen_size:[f32;2],
+    marker:IsEguiTextureMarker,
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 pub struct ScreenDescriptor {
@@ -71,14 +77,11 @@ pub struct EguiVulkanoRenderPass {
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    sampler: Arc<Sampler>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-    uniform_buffer_pool: CpuBufferPool<UniformBuffer>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
-    descriptor_set_0_pool: FixedSizeDescriptorSetsPool,
+    descriptor_set_0: Arc<dyn DescriptorSet +Send+Sync>,
     dynamic: DynamicState,
-
     image_transfer_request_list: Vec<TextureId>,
     request_sender: Sender<Work>,
     done_notifier: Receiver<TextureId>,
@@ -125,13 +128,15 @@ impl EguiVulkanoRenderPass {
             0.0,
         )
         .unwrap();
-        let uniform_buffer_pool = CpuBufferPool::uniform_buffer(device.clone());
+
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
-        let descriptor_set_0_pool = FixedSizeDescriptorSetsPool::new(
-            pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
-        );
+
         let (request_sender, done_notifier) = spawn_image_upload_thread();
+        let descriptor_set_0 = Arc::new(
+            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layout(0).unwrap().clone())
+                .add_sampler(sampler).unwrap().build().unwrap()
+        );
         Self {
             pipeline,
             egui_texture_descriptor_set: None,
@@ -139,13 +144,10 @@ impl EguiVulkanoRenderPass {
             user_textures: vec![],
             device,
             queue,
-
-            sampler,
             frame_buffers: vec![],
-            uniform_buffer_pool,
             vertex_buffer_pool,
             index_buffer_pool,
-            descriptor_set_0_pool,
+            descriptor_set_0,
             dynamic: Default::default(),
 
             image_transfer_request_list: vec![],
@@ -219,22 +221,8 @@ impl EguiVulkanoRenderPass {
             self.frame_buffers[image_num.unwrap()].clone()
         };
         let logical = screen_descriptor.logical_size();
-        let sub_buffer = self
-            .uniform_buffer_pool
-            .next(UniformBuffer {
-                _u_screen_size: [logical.0 as f32, logical.1 as f32],
-            })
-            .unwrap();
-        let descriptor_set_0 = Arc::new(
-            self.descriptor_set_0_pool
-                .next()
-                .add_buffer(sub_buffer)
-                .unwrap()
-                .add_sampler(self.sampler.clone())
-                .unwrap()
-                .build()
-                .unwrap(),
-        );
+
+
 
         let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
             self.device.clone(),
@@ -326,6 +314,14 @@ impl EguiVulkanoRenderPass {
                         BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
                             .slice(vertex_range)
                             .unwrap();
+                    let marker= if texture_id==TextureId::Egui{
+                        IS_EGUI
+                    }else {
+                        IS_USER
+                    };
+                    let pc={
+                        PushConstants{ u_screen_size: [logical.0 as f32,logical.1 as f32], marker }
+                    };
                     {
                         self.dynamic.scissors = Some(vec![scissor.unwrap()]);
                         pass.draw_indexed(
@@ -333,8 +329,8 @@ impl EguiVulkanoRenderPass {
                             &self.dynamic,
                             vertex_buffer,
                             index_buffer,
-                            (descriptor_set_0.clone(), texture_desc_set),
-                            (),
+                            (self.descriptor_set_0.clone(), texture_desc_set),
+                            pc,
                             vec![],
                         )
                         .unwrap();
@@ -352,15 +348,9 @@ impl EguiVulkanoRenderPass {
         if self.egui_texture_version == Some(texture.version) {
             return;
         }
-        let format = vulkano::format::Format::R8G8B8A8Srgb;
-        let it: Vec<[u8; 4]> = texture
-            .pixels
-            .iter()
-            .map(|x| Color32::from_white_alpha(*x).to_array())
-            .collect();
-
+        let format = vulkano::format::Format::R8Unorm;
         let image = vulkano::image::ImmutableImage::from_iter(
-            it.iter().cloned(),
+            texture.pixels.iter().cloned(),
             Dimensions::Dim2d {
                 width: texture.width as u32,
                 height: texture.height as u32,
