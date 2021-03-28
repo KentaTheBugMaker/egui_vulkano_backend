@@ -3,8 +3,8 @@ use crate::Pipeline;
 use std::ffi::CString;
 use std::sync::Arc;
 use vulkano::descriptor::descriptor::{
-    DescriptorBufferDesc, DescriptorDesc, DescriptorDescTy, DescriptorImageDesc,
-    DescriptorImageDescArray, DescriptorImageDescDimensions, ShaderStages,
+    DescriptorDesc, DescriptorDescTy, DescriptorImageDesc, DescriptorImageDescArray,
+    DescriptorImageDescDimensions, ShaderStages,
 };
 use vulkano::descriptor::pipeline_layout::{PipelineLayoutDesc, PipelineLayoutDescPcRange};
 use vulkano::device::Device;
@@ -114,9 +114,7 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
     }
 
     fn num_bindings_in_set(&self, set: usize) -> Option<usize> {
-        if set == 1 {
-            Some(1)
-        } else if set == 0 {
+        if (set == 1) | (set == 0) {
             Some(1)
         } else {
             None
@@ -139,7 +137,7 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
                     },
                     readonly: true,
                 })
-            }else {
+            } else {
                 None
             }
         } else if set == 1 {
@@ -163,7 +161,7 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
                     },
                     readonly: true,
                 })
-            }else{
+            } else {
                 None
             }
         } else {
@@ -176,8 +174,8 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
     }
 
     fn push_constants_range(&self, num: usize) -> Option<PipelineLayoutDescPcRange> {
-        if num==0{
-            Some(PipelineLayoutDescPcRange{
+        if num == 0 {
+            Some(PipelineLayoutDescPcRange {
                 offset: 0,
                 size: 12,
                 stages: ShaderStages {
@@ -186,10 +184,10 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
                     tessellation_evaluation: false,
                     geometry: false,
                     fragment: true,
-                    compute: false
-                }
+                    compute: false,
+                },
             })
-        }else{
+        } else {
             None
         }
     }

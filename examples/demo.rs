@@ -217,8 +217,8 @@ fn main() {
                     physical_height: surface.window().inner_size().height,
                     scale_factor: surface.window().scale_factor() as f32,
                 };
-                egui_render_pass.upload_egui_texture(&platform.context().texture());
-                egui_render_pass.upload_pending_textures();
+                egui_render_pass.request_upload_egui_texture(&platform.context().texture());
+                //      egui_render_pass.upload_pending_textures();
                 let render_command = egui_render_pass.create_command_buffer(
                     None,
                     Some(image_num),

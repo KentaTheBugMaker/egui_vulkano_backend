@@ -1,3 +1,12 @@
+//! [egui](https://docs.rs/egui) rendering integration for vulkano
+//!
+//! This crate have some features
+//! * background user texture upload
+//! * map vulkano texture to user texture
+//! * [easily extend to multi thread rendering](https://github.com/t18b219k/egui_vulkano_backend/blob/master/examples/multi_thread_rendering.rs)
+//! * faster than official backend
+//! * lower cpu usage
+//! * lower memory usage
 mod render_pass;
 mod shader;
 
@@ -12,12 +21,12 @@ use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
 use vulkano::command_buffer::{
     AutoCommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
 };
-use vulkano::descriptor::descriptor_set::{ PersistentDescriptorSet};
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
-use vulkano::image::{Dimensions, ImageViewAccess, MipmapsCount, SwapchainImage};
+use vulkano::image::{Dimensions, ImageViewAccess, ImmutableImage, MipmapsCount, SwapchainImage};
 
 use crate::shader::create_pipeline;
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
@@ -41,14 +50,15 @@ struct EguiVulkanoVertex {
 }
 
 struct IsEguiTextureMarker(u32);
-const IS_EGUI:IsEguiTextureMarker=IsEguiTextureMarker(1);
-const IS_USER:IsEguiTextureMarker=IsEguiTextureMarker(0);
+const IS_EGUI: IsEguiTextureMarker = IsEguiTextureMarker(1);
+const IS_USER: IsEguiTextureMarker = IsEguiTextureMarker(0);
 #[repr(C)]
-struct PushConstants{
-    u_screen_size:[f32;2],
-    marker:IsEguiTextureMarker,
+struct PushConstants {
+    u_screen_size: [f32; 2],
+    marker: IsEguiTextureMarker,
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
+/// same as [egui_wgpu_backend::ScreenDescriptor](https://docs.rs/egui_wgpu_backend/0.5.0/egui_wgpu_backend/struct.ScreenDescriptor.html)
 pub struct ScreenDescriptor {
     /// Width of the window in physical pixel.
     pub physical_width: u32,
@@ -72,7 +82,7 @@ type Pipeline = GraphicsPipeline<
 /// egui rendering command builder
 pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,
-    egui_texture_descriptor_set: Option<Arc<dyn DescriptorSet + Send + Sync>>,
+    egui_texture_descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
     egui_texture_version: Option<u64>,
     user_textures: Vec<Option<UserTexture>>,
     device: Arc<Device>,
@@ -80,7 +90,7 @@ pub struct EguiVulkanoRenderPass {
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
-    descriptor_set_0: Arc<dyn DescriptorSet +Send+Sync>,
+    descriptor_set_0: Arc<dyn DescriptorSet + Send + Sync>,
     dynamic: DynamicState,
     image_transfer_request_list: Vec<TextureId>,
     request_sender: Sender<Work>,
@@ -134,12 +144,33 @@ impl EguiVulkanoRenderPass {
 
         let (request_sender, done_notifier) = spawn_image_upload_thread();
         let descriptor_set_0 = Arc::new(
-            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layout(0).unwrap().clone())
-                .add_sampler(sampler).unwrap().build().unwrap()
+            PersistentDescriptorSet::start(
+                pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
+            )
+            .add_sampler(sampler)
+            .unwrap()
+            .build()
+            .unwrap(),
         );
+        let egui_texture = ImmutableImage::from_iter(
+            [0u8].iter().copied(),
+            Dimensions::Dim2d {
+                width: 1,
+                height: 1,
+            },
+            MipmapsCount::One,
+            vulkano::format::Format::R8Unorm,
+            queue.clone(),
+        )
+        .unwrap();
+        request_sender
+            .send((TextureId::Egui, egui_texture.1))
+            .unwrap();
+        let egui_texture_descriptor_set =
+            Self::create_descriptor_set_from_view(pipeline.clone(), egui_texture.0);
         Self {
             pipeline,
-            egui_texture_descriptor_set: None,
+            egui_texture_descriptor_set,
             egui_texture_version: None,
             user_textures: vec![],
             device,
@@ -221,8 +252,6 @@ impl EguiVulkanoRenderPass {
             self.frame_buffers[image_num.unwrap()].clone()
         };
         let logical = screen_descriptor.logical_size();
-
-
 
         let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
             self.device.clone(),
@@ -314,13 +343,16 @@ impl EguiVulkanoRenderPass {
                         BufferSlice::from_typed_buffer_access(vertex_buffer.clone())
                             .slice(vertex_range)
                             .unwrap();
-                    let marker= if texture_id==TextureId::Egui{
+                    let marker = if texture_id == TextureId::Egui {
                         IS_EGUI
-                    }else {
+                    } else {
                         IS_USER
                     };
-                    let pc={
-                        PushConstants{ u_screen_size: [logical.0 as f32,logical.1 as f32], marker }
+                    let pc = {
+                        PushConstants {
+                            u_screen_size: [logical.0 as f32, logical.1 as f32],
+                            marker,
+                        }
                     };
                     {
                         self.dynamic.scissors = Some(vec![scissor.unwrap()]);
@@ -343,7 +375,7 @@ impl EguiVulkanoRenderPass {
     }
     /// Update egui system texture
     /// You must call before every  create_command_buffer
-    pub fn upload_egui_texture(&mut self, texture: &Texture) {
+    pub fn request_upload_egui_texture(&mut self, texture: &Texture) {
         //no change
         if self.egui_texture_version == Some(texture.version) {
             return;
@@ -360,13 +392,16 @@ impl EguiVulkanoRenderPass {
             self.queue.clone(),
         )
         .unwrap();
-        image.1.flush().unwrap();
+        self.request_sender
+            .send((TextureId::Egui, image.1))
+            .expect("failed to send system texture upload request");
         let image_view = image.0 as Arc<dyn ImageViewAccess + Sync + Send>;
         let pipeline = self.pipeline.clone();
         self.egui_texture_descriptor_set =
-            Some(Self::create_descriptor_set_from_view(pipeline, image_view));
+            Self::create_descriptor_set_from_view(pipeline, image_view);
         self.egui_texture_version = Some(texture.version);
     }
+
     fn alloc_user_texture(&mut self) -> TextureId {
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
@@ -387,9 +422,13 @@ impl EguiVulkanoRenderPass {
         }
     }
     /// waiting image upload done.
-    /// this ensure no image glitch.
-    /// you must call before
-    pub fn upload_pending_textures(&mut self) {
+    ///
+    /// usually you don't need to call .
+    ///
+    /// this cause blocking but ensure no image glitch.
+    ///
+    /// you must call before  create command buffer
+    pub fn wait_texture_upload(&mut self) {
         //wait
         // check request is not empty
         if !self.image_transfer_request_list.is_empty() {
@@ -432,7 +471,7 @@ impl EguiVulkanoRenderPass {
                 .descriptor_set
                 .clone()
         } else {
-            self.egui_texture_descriptor_set.clone().unwrap()
+            self.egui_texture_descriptor_set.clone()
         }
     }
     pub fn set_user_texture(
