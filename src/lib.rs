@@ -39,7 +39,7 @@ use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain::SwapchainAcquireFuture;
+use vulkano::swapchain::{AcquireError, Swapchain, SwapchainAcquireFuture};
 use vulkano::sync::{GpuFuture, NowFuture};
 
 #[derive(Default, Debug, Copy, Clone)]
@@ -606,4 +606,141 @@ fn skip_by_clip(
 
 struct UserTexture {
     descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
+}
+/// four thread for rendering
+/// thread 0 | thread 1| thread 2 | thread 3|
+/// management | image upload| command build |present+rendering |
+///
+
+pub struct RenderingDispatcher<Window: 'static + Send + Sync> {
+    inner: Arc<Mutex<EguiVulkanoRenderPass>>,
+    swap_chain: Arc<Swapchain<Window>>,
+    build_request_sender: Sender<BuildRequest>,
+    render_request_sender: Sender<RenderRequest<Window>>,
+    command_buffer_receiver: Receiver<CommandBuffer>,
+}
+type RenderRequest<Window> = (AutoCommandBuffer, SwapchainAcquireFuture<Window>);
+type BuildRequest = (usize, Vec<ClippedMesh>, ScreenDescriptor);
+type CommandBuffer = AutoCommandBuffer;
+impl<Window: Send + Sync> RenderingDispatcher<Window> {
+    pub fn build(
+        device: Arc<Device>,
+        queue: Arc<Queue>,
+        swap_chain_images: &[Arc<SwapchainImage<Window>>],
+    ) -> Self {
+        let swap_chain = swap_chain_images[0].swapchain().clone();
+        let format = swap_chain.format();
+        let inner = Arc::new(Mutex::new(EguiVulkanoRenderPass::new(
+            device,
+            queue.clone(),
+            format,
+        )));
+        inner
+            .lock()
+            .unwrap()
+            .create_frame_buffers(&swap_chain_images);
+        //rendering request channel
+        let (render_request_sender, render_request_receiver): (
+            Sender<RenderRequest<Window>>,
+            Receiver<RenderRequest<Window>>,
+        ) = std::sync::mpsc::channel();
+
+        let (build_request_sender, build_request_receiver): (
+            Sender<BuildRequest>,
+            Receiver<BuildRequest>,
+        ) = std::sync::mpsc::channel();
+        let (command_buffer_sender, command_buffer_receiver) = std::sync::mpsc::channel();
+        // spawn threads
+
+        //rendering and present thread
+        std::thread::spawn(move || {
+            for render_request in render_request_receiver.iter() {
+                //   inner.present_to_screen(command_buffer,future);
+
+                let acquire_future = render_request.1;
+                let command = render_request.0;
+                let swap_chain = acquire_future.swapchain().clone();
+                let image_id = acquire_future.image_id();
+
+                if let Ok(ok) = acquire_future
+                    .then_execute(queue.clone(), command)
+                    .unwrap()
+                    .then_swapchain_present(queue.clone(), swap_chain, image_id)
+                    .then_signal_fence_and_flush()
+                {
+                    if ok.wait(None).is_ok() {};
+                }
+            }
+        });
+        // command build thread
+        let clone_inner = inner.clone();
+        std::thread::spawn(move || {
+            for (x, paint_job, screen_descriptor) in build_request_receiver.iter() {
+                let command = clone_inner.lock().unwrap().create_command_buffer(
+                    None,
+                    Some(x),
+                    &paint_job,
+                    &screen_descriptor,
+                );
+                command_buffer_sender.send(command).unwrap();
+            }
+        });
+        Self {
+            inner,
+            swap_chain,
+            build_request_sender,
+            render_request_sender,
+            command_buffer_receiver,
+        }
+    }
+    pub fn create_frame_buffers(&self, images: &[Arc<SwapchainImage<Window>>]) {
+        self.inner.lock().unwrap().create_frame_buffers(images);
+    }
+    pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) -> bool {
+        //get new frame
+        let (image_num, _sub_optimal, future) =
+            match vulkano::swapchain::acquire_next_image(self.swap_chain.clone(), None) {
+                Ok(r) => r,
+                Err(AcquireError::OutOfDate) => {
+                    //recreate_swapchain = true;
+                    println!("out of date");
+                    return true;
+                }
+                Err(e) => panic!("Failed to acquire next image: {:?}", e),
+            };
+        println!("acquire next image");
+        //add new rendering request and pull command
+
+        self.build_request_sender
+            .send((image_num, job, screen_desc))
+            .unwrap();
+        println!("command build request sent ");
+        let command_buffer = self.command_buffer_receiver.recv().unwrap();
+        self.render_request_sender
+            .send((command_buffer, future))
+            .unwrap();
+        false
+    }
+    pub fn upload_egui_texture(&self, texture: &epi::egui::Texture) {
+        self.inner
+            .lock()
+            .unwrap()
+            .request_upload_egui_texture(texture)
+    }
+}
+impl<W: Send + Sync> epi::TextureAllocator for RenderingDispatcher<W> {
+    fn alloc_srgba_premultiplied(
+        &mut self,
+        size: (usize, usize),
+        srgba_pixels: &[Color32],
+    ) -> TextureId {
+        self.inner
+            .lock()
+            .unwrap()
+            .alloc_srgba_premultiplied(size, srgba_pixels)
+    }
+
+    fn free(&mut self, id: TextureId) {
+        self.inner.lock().unwrap().free(id)
+    }
 }

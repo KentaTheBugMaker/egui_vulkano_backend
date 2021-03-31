@@ -3,10 +3,9 @@ use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
 
-use vulkano::swapchain;
 use vulkano::swapchain::{
-    AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
-    SwapchainAcquireFuture, SwapchainCreationError,
+    ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
+    SwapchainCreationError,
 };
 
 use vulkano::sync::GpuFuture;
@@ -18,13 +17,12 @@ use winit::window::WindowBuilder;
 
 use chrono::Timelike;
 use egui::FontDefinitions;
-use egui_vulkano_backend::ScreenDescriptor;
+use egui_vulkano_backend::{RenderingDispatcher, ScreenDescriptor};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 
-use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
-use vulkano::command_buffer::AutoCommandBuffer;
+
 use vulkano::format::Format;
 
 /// A custom event type for the winit app.
@@ -58,16 +56,6 @@ fn main() {
         physical.ty()
     );
     // create rendering request channel
-    let (tx, rx): (
-        Sender<(
-            AutoCommandBuffer,
-            SwapchainAcquireFuture<winit::window::Window>,
-        )>,
-        Receiver<(
-            AutoCommandBuffer,
-            SwapchainAcquireFuture<winit::window::Window>,
-        )>,
-    ) = std::sync::mpsc::channel();
 
     let event_loop = EventLoop::with_user_event();
     let surface = WindowBuilder::new()
@@ -93,7 +81,7 @@ fn main() {
     .unwrap();
     let queue = queues.next().unwrap();
 
-    let mut swapchain = {
+    let (mut swapchain, images) = {
         let caps = surface.capabilities(physical).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         //     let alpha = CompositeAlpha::PreMultiplied;
@@ -120,34 +108,11 @@ fn main() {
             ColorSpace::SrgbNonLinear,
         )
         .unwrap()
-        .0
     };
 
-    //create renderer
-    let mut egui_render_pass = egui_vulkano_backend::EguiVulkanoRenderPass::new(
-        device.clone(),
-        queue.clone(),
-        swapchain.format(),
-    );
-    let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
-    let queue_clone = queue.clone();
-    std::thread::spawn(move || {
-        for request in rx.lock().unwrap().iter() {
-            let acquire_future = request.1;
-            let command = request.0;
-            let swap_chain = acquire_future.swapchain().clone();
-            let image_id = acquire_future.image_id();
+    let mut multi_thread_renderer =
+        RenderingDispatcher::build(device.clone(), queue.clone(), &images);
 
-            if let Ok(ok) = acquire_future
-                .then_execute(queue_clone.clone(), command)
-                .unwrap()
-                .then_swapchain_present(queue_clone.clone(), swap_chain, image_id)
-                .then_signal_fence_and_flush()
-            {
-                if ok.wait(None).is_ok() {};
-            }
-        }
-    });
     //init egui
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),
@@ -165,7 +130,7 @@ fn main() {
     // Display the demo application that ships with egui.
     let mut demo_app = egui_demo_lib::WrapApp::default();
     //we want to initialize all framebuffers so we check it true
-    let mut recreate_swapchain = true;
+    let mut recreate_swapchain = false;
     let http = std::sync::Arc::new(epi_http::EpiHttp {});
     let start_time = Instant::now();
     let mut previous_frame_time = None;
@@ -200,7 +165,7 @@ fn main() {
                         seconds_since_midnight: Some(seconds_since_midnight()),
                         native_pixels_per_point: Some(surface.window().scale_factor() as _),
                     },
-                    tex_allocator: &mut egui_render_pass,
+                    tex_allocator: &mut multi_thread_renderer,
                     http: http.clone(),
                     output: &mut app_output,
                     repaint_signal: repaint_signal.clone(),
@@ -228,23 +193,8 @@ fn main() {
                             Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                         };
                     swapchain = new_swapchain;
-                    egui_render_pass.create_frame_buffers(&new_images);
-
+                    multi_thread_renderer.create_frame_buffers(&new_images);
                     recreate_swapchain = false;
-                }
-
-                let (image_num, suboptimal, acquire_future) =
-                    match swapchain::acquire_next_image(swapchain.clone(), None) {
-                        Ok(r) => r,
-                        Err(AcquireError::OutOfDate) => {
-                            recreate_swapchain = true;
-                            return;
-                        }
-                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                    };
-
-                if suboptimal {
-                    recreate_swapchain = true;
                 }
 
                 let screen_descriptor = ScreenDescriptor {
@@ -252,15 +202,12 @@ fn main() {
                     physical_height: surface.window().inner_size().height,
                     scale_factor: surface.window().scale_factor() as f32,
                 };
-                egui_render_pass.request_upload_egui_texture(&platform.context().texture());
-                //  egui_render_pass.upload_pending_textures();
-                let render_command = egui_render_pass.create_command_buffer(
-                    None,
-                    Some(image_num),
-                    &paint_jobs,
-                    &screen_descriptor,
-                );
-                tx.send((render_command, acquire_future)).unwrap();
+
+                multi_thread_renderer.upload_egui_texture(&platform.context().texture());
+
+                println!("call mtr render");
+                recreate_swapchain = multi_thread_renderer.render(paint_jobs, screen_descriptor);
+
                 let epi::backend::AppOutput { quit, window_size } = app_output;
                 *control_flow = if quit {
                     ControlFlow::Exit
@@ -270,7 +217,7 @@ fn main() {
                 } else {
                     ControlFlow::Wait
                 };
-                //    egui_render_pass.present_to_screen(render_command, acquire_future);
+
                 *control_flow = ControlFlow::Poll
             }
             Event::UserEvent(_) => {
