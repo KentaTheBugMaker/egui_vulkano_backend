@@ -11,7 +11,7 @@ this crate rendering only you need I/O egui integration e.g. [egui_winit_platfor
 ## known bug 
 None
 ## Update 
- * target valkano 0.22.0 (v0.3.0)
+ * target vulkano 0.22.0 (v0.3.0)
    
  * reduce crate size(v0.2.3)
  * remove vulkano_shader dependency extremely faster build time 
@@ -33,9 +33,22 @@ We have created [a simple example](https://github.com/t18b219k/egui_vulkano_back
 ```shell
 cargo run --example demo
 ```
+## Version list
+
+|egui_vulkano_backend |vulkano |vulkano-shader |
+|---------------------|--------|---------------|
+|0.0.1 | 0.20.0|0.20.0|
+|0.0.2 | 0.20.0|0.20.0|
+|0.0.3 | 0.21.0|0.20.0|
+|0.0.4 | 0.21.0|none|
+|0.0.5 | 0.21.0|none|
+|0.1.0 | 0.21.0|none|
+|0.2.0 | 0.21.0|none|
+|0.2.1 | 0.21.0|none|
+|0.2.2 | 0.21.0|none|
+|0.3.0 | 0.22.0|none|
 ## License
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
-
 See [LICENSE-APACHE](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-APACHE), [LICENSE-MIT](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-MIT).
 ## Credits
  * egui_wgpu_backend developers

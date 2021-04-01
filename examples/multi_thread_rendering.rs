@@ -5,7 +5,7 @@ use egui::FontDefinitions;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::format::Format;
+
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::swapchain::{
@@ -79,10 +79,8 @@ fn main() {
         let caps = surface.capabilities(physical).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         //     let alpha = CompositeAlpha::PreMultiplied;
-        assert!(&caps
-            .supported_formats
-            .contains(&(Format::B8G8R8A8Srgb, ColorSpace::SrgbNonLinear)));
-        let format = Format::B8G8R8A8Srgb;
+
+        let format = caps.supported_formats[0].0;
         let dimensions: [u32; 2] = surface.window().inner_size().into();
 
         Swapchain::new(
@@ -94,7 +92,7 @@ fn main() {
             1,
             ImageUsage {
                 transfer_source: false,
-                transfer_destination: true,
+                transfer_destination: false,
                 sampled: false,
                 storage: false,
                 color_attachment: true,
@@ -113,7 +111,13 @@ fn main() {
         .unwrap()
     };
 
-    let mut multi_thread_renderer = MultiThreadRenderer::build(device.clone(), queue.clone(), swapchain.format());
+    let mut multi_thread_renderer = MultiThreadRenderer::build(
+        device.clone(),
+        queue,
+        swapchain.clone(),
+        images,
+        swapchain.format(),
+    );
 
     //init egui
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
@@ -132,7 +136,7 @@ fn main() {
     // Display the demo application that ships with egui.
     let mut demo_app = egui_demo_lib::WrapApp::default();
     //we want to initialize all framebuffers so we check it true
-
+    let mut need_to_resize = false;
     let http = std::sync::Arc::new(epi_http::EpiHttp {});
     let start_time = Instant::now();
     let mut previous_frame_time = None;
@@ -146,7 +150,12 @@ fn main() {
             } => {
                 *control_flow = ControlFlow::Exit;
             }
-
+            Event::WindowEvent {
+                event: WindowEvent::Resized(_),
+                ..
+            } => {
+                need_to_resize = true;
+            }
             Event::RedrawEventsCleared | Event::RedrawRequested(_) => {
                 platform.update_time(start_time.elapsed().as_secs_f64());
 
@@ -162,8 +171,7 @@ fn main() {
                         seconds_since_midnight: Some(seconds_since_midnight()),
                         native_pixels_per_point: Some(surface.window().scale_factor() as _),
                     },
-                    tex_allocator:
-                    &mut multi_thread_renderer,
+                    tex_allocator: &mut multi_thread_renderer,
                     http: http.clone(),
                     output: &mut app_output,
                     repaint_signal: repaint_signal.clone(),
@@ -190,11 +198,14 @@ fn main() {
                 multi_thread_renderer.request_upload_egui_texture(&platform.context().texture());
 
                 println!("call mtr render");
-                multi_thread_renderer.render(paint_jobs, screen_descriptor);
+                let resize = multi_thread_renderer.render(paint_jobs, screen_descriptor);
 
+                if resize | need_to_resize {
+                    multi_thread_renderer.resize(surface.window().inner_size().into());
+                }
                 let epi::backend::AppOutput { quit, window_size } = app_output;
-                if let Some(size) = window_size {
-                    multi_thread_renderer.resize([size.x as u32, size.y as u32])
+                if let Some(_size) = window_size {
+                    //multi_thread_renderer.resize([size.x as u32, size.y as u32])
                 }
                 *control_flow = if quit {
                     ControlFlow::Exit

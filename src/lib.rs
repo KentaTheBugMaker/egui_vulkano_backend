@@ -9,41 +9,38 @@
 //! * lower memory usage
 extern crate vulkano;
 
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use iter_vec::ExactSizedIterVec;
 use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
-use vulkano::command_buffer::{
-    AutoCommandBuffer, CommandBuffer, CommandBufferExecFuture,
-    DynamicState, SubpassContents,
-};
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
-use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
+use vulkano::command_buffer::{
+    AutoCommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
+};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::format::Format::R8G8B8A8Srgb;
-use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
 use vulkano::framebuffer::Framebuffer;
-use vulkano::image::{AttachmentImage, ImageUsage, ImmutableImage, MipmapsCount, SwapchainImage, ImageDimensions};
-use vulkano::image::view::{ImageViewAbstract, ImageView};
-use vulkano::pipeline::GraphicsPipeline;
-use vulkano::pipeline::vertex::{SingleBufferDefinition, BufferlessDefinition};
+use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
+use vulkano::image::view::{ImageView, ImageViewAbstract};
+use vulkano::image::{ImageDimensions, ImmutableImage, MipmapsCount, SwapchainImage};
+use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
+use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain::SwapchainAcquireFuture;
+use vulkano::swapchain::{AcquireError, Swapchain, SwapchainAcquireFuture, SwapchainCreationError};
 use vulkano::sync::{GpuFuture, NowFuture};
 
 use crate::render_pass::EguiRenderPassDesc;
 use crate::shader::create_pipeline;
-use crate::present_shader::create_present_pipeline;
 
 mod render_pass;
 mod shader;
-mod present_shader;
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -160,7 +157,7 @@ impl EguiVulkanoRenderPass {
             ImageDimensions::Dim2d {
                 width: 1,
                 height: 1,
-                array_layers: 1
+                array_layers: 1,
             },
             MipmapsCount::One,
             vulkano::format::Format::R8Unorm,
@@ -170,7 +167,7 @@ impl EguiVulkanoRenderPass {
         request_sender
             .send((TextureId::Egui, egui_texture.1))
             .unwrap();
-        let image_view=ImageView::new(egui_texture.0).unwrap();
+        let image_view = ImageView::new(egui_texture.0).unwrap();
         let egui_texture_descriptor_set =
             Self::create_descriptor_set_from_view(pipeline.clone(), image_view);
         Self {
@@ -201,7 +198,7 @@ impl EguiVulkanoRenderPass {
         self.frame_buffers = image_views
             .iter()
             .map(|image| {
-                let view=ImageView::new(image.clone()).unwrap();
+                let view = ImageView::new(image.clone()).unwrap();
                 Arc::new(
                     Framebuffer::start(self.pipeline.clone())
                         .add(view)
@@ -397,7 +394,7 @@ impl EguiVulkanoRenderPass {
             ImageDimensions::Dim2d {
                 width: texture.width as u32,
                 height: texture.height as u32,
-                array_layers: 1
+                array_layers: 1,
             },
             MipmapsCount::One,
             format,
@@ -407,7 +404,7 @@ impl EguiVulkanoRenderPass {
         self.request_sender
             .send((TextureId::Egui, image.1))
             .expect("failed to send system texture upload request");
-        let image_view=ImageView::new(image.0).unwrap();
+        let image_view = ImageView::new(image.0).unwrap();
         let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
         let pipeline = self.pipeline.clone();
         self.egui_texture_descriptor_set =
@@ -515,7 +512,7 @@ impl EguiVulkanoRenderPass {
                     ImageDimensions::Dim2d {
                         width: size.0 as u32,
                         height: size.1 as u32,
-                        array_layers: 1
+                        array_layers: 1,
                     },
                     MipmapsCount::One,
                     R8G8B8A8Srgb,
@@ -527,7 +524,7 @@ impl EguiVulkanoRenderPass {
                     .expect("faild to send image upload request");
                 self.image_transfer_request_list
                     .push(TextureId::User(id as u64));
-                let image_view=ImageView::new(image).unwrap();
+                let image_view = ImageView::new(image).unwrap();
                 let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
                 let desc = Self::create_descriptor_set_from_view(self.pipeline.clone(), image_view);
                 *slot = Some(UserTexture {
@@ -617,13 +614,13 @@ fn skip_by_clip(
 struct UserTexture {
     descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
 }
-type PresentPipeline = GraphicsPipeline<BufferlessDefinition, Box<dyn PipelineLayoutAbstract+Send+Sync>, Arc<RenderPass<EguiRenderPassDesc>>>;
+
 /// four thread for rendering
 /// thread 0 | thread 1| thread 2 | thread 3|
 /// management | image upload| command build |present+rendering |
 ///
 struct BuildRequest {
-    render_target:Arc<ImageView<Arc<AttachmentImage>>> ,
+    render_target: usize,
     paint_job: Vec<ClippedMesh>,
     screen_descriptor: ScreenDescriptor,
 }
@@ -632,117 +629,130 @@ struct RenderRequest {
     command_buffer: AutoCommandBuffer,
 }
 
-pub struct MultiThreadRenderer {
+pub struct MultiThreadRenderer<Window> {
     inner: Arc<Mutex<EguiVulkanoRenderPass>>,
-    render_target: Arc<AttachmentImage>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     build_request_sender: Sender<BuildRequest>,
-    format: Format,
+    render_request_receiver: Receiver<RenderRequest>,
+    swap_chain: Arc<Swapchain<Window>>,
 }
 
-impl MultiThreadRenderer {
-    pub fn build(device: Arc<Device>, queue: Arc<Queue>, format: Format) -> Self {
-        let render_target = AttachmentImage::with_usage(
+impl<Window: Send + Sync + 'static> MultiThreadRenderer<Window> {
+    pub fn build(
+        device: Arc<Device>,
+        queue: Arc<Queue>,
+        swap_chain: Arc<Swapchain<Window>>,
+        swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
+        format: Format,
+    ) -> Self {
+        let inner = Arc::new(Mutex::new(EguiVulkanoRenderPass::new(
             device.clone(),
-            [1, 1],
+            queue.clone(),
             format,
-            ImageUsage {
-                transfer_source: true,
-                transfer_destination: false,
-                sampled: false,
-                storage: false,
-                color_attachment: true,
-                depth_stencil_attachment: false,
-                transient_attachment: false,
-                input_attachment: false,
-            },
-        )
-            .unwrap();
-        let inner = Arc::new(Mutex::new(EguiVulkanoRenderPass::new(device.clone(), queue.clone(), format)));
-        let render_request_channel: (Sender<RenderRequest>, Receiver<RenderRequest>) = std::sync::mpsc::channel();
-        let build_request_channel: (Sender<BuildRequest>, Receiver<BuildRequest>) = std::sync::mpsc::channel();
-
-        let pipeline=create_present_pipeline(device.clone(),format);
-
-        let clone_queue_1 = queue.clone();
+        )));
+        let render_request_channel: (Sender<RenderRequest>, Receiver<RenderRequest>) =
+            std::sync::mpsc::channel();
+        let build_request_channel: (Sender<BuildRequest>, Receiver<BuildRequest>) =
+            std::sync::mpsc::channel();
         let rrs = render_request_channel.0;
         let rrr = render_request_channel.1;
         let brs = build_request_channel.0;
         let brr = build_request_channel.1;
         let clone_inner = inner.clone();
-        std::thread::spawn(move || {
-            loop {
-                let build_request = brr.recv().unwrap();
-                let command = clone_inner.lock().unwrap().create_command_buffer(
-                    Some(build_request.render_target),
-                    None,
-                    &build_request.paint_job,
-                    &build_request.screen_descriptor,
-                );
-                rrs
-                    .send(RenderRequest {
-                        command_buffer: command,
-                    })
-                    .unwrap();
-            }
+        inner
+            .lock()
+            .unwrap()
+            .create_frame_buffers(&swap_chain_images);
+        std::thread::spawn(move || loop {
+            let build_request = brr.recv().unwrap();
+            let command = clone_inner.lock().unwrap().create_command_buffer(
+                None,
+                Some(build_request.render_target),
+                &build_request.paint_job,
+                &build_request.screen_descriptor,
+            );
+            rrs.send(RenderRequest {
+                command_buffer: command,
+            })
+            .unwrap();
         });
-        std::thread::spawn(move || {
-            for render_request in rrr.iter() {
-                render_request
-                    .command_buffer
-                    .execute(clone_queue_1.clone())
-                    .unwrap()
-                    .flush()
-                    .unwrap();
-            }
-        });
+
         Self {
             inner,
-            render_target,
             device,
             queue,
-
             build_request_sender: brs,
-            format,
+            render_request_receiver: rrr,
+            swap_chain,
         }
     }
     pub fn resize(&mut self, dimensions: [u32; 2]) {
-        self.render_target = AttachmentImage::with_usage(
-            self.device.clone(),
-            dimensions,
-            self.format,
-            ImageUsage {
-                transfer_source: true,
-                transfer_destination: false,
-                sampled: false,
-                storage: false,
-                color_attachment: true,
-                depth_stencil_attachment: false,
-                transient_attachment: false,
-                input_attachment: false,
-            },
-        )
-            .unwrap();
+        let new = self.swap_chain.recreate_with_dimensions(dimensions);
+        let images = match new {
+            Ok(r) => {
+                self.swap_chain = r.0;
+                r.1
+            }
+            Err(SwapchainCreationError::UnsupportedDimensions) => return,
+            Err(e) => {
+                panic!("Failed to recreate swap chain : {:?}", e)
+            }
+        };
+        self.inner.lock().unwrap().create_frame_buffers(&images);
     }
-    pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) {
-        let view=ImageView::new(self.render_target.clone()).unwrap();
+    pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) -> bool {
+        let (image_num, sub_opt, future) =
+            match vulkano::swapchain::acquire_next_image(self.swap_chain.clone(), None) {
+                Ok(r) => r,
+                Err(AcquireError::OutOfDate) => return true,
+                Err(e) => {
+                    panic!("Failed to acquire next image : {:?}", e)
+                }
+            };
+        if sub_opt {
+            return true;
+        }
+
         self.build_request_sender
             .send(BuildRequest {
-                render_target: view,
+                render_target: image_num,
                 paint_job: job,
                 screen_descriptor: screen_desc,
             })
             .unwrap();
+
+        let now = vulkano::sync::now(self.device.clone());
+        // sync rendering finish
+        let cmd_buf = self.render_request_receiver.recv().unwrap();
+        now.join(future)
+            .then_execute(self.queue.clone(), cmd_buf.command_buffer)
+            .unwrap()
+            .then_swapchain_present(self.queue.clone(), self.swap_chain.clone(), image_num)
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
+        false
     }
     pub fn request_upload_egui_texture(&self, texture: &Texture) {
-        self.inner.lock().unwrap().request_upload_egui_texture(texture)
+        self.inner
+            .lock()
+            .unwrap()
+            .request_upload_egui_texture(texture)
     }
 }
 
-impl epi::TextureAllocator for MultiThreadRenderer {
-    fn alloc_srgba_premultiplied(&mut self, size: (usize, usize), srgba_pixels: &[Color32]) -> TextureId {
-        self.inner.lock().unwrap().alloc_srgba_premultiplied(size, srgba_pixels)
+impl<Window> epi::TextureAllocator for MultiThreadRenderer<Window> {
+    fn alloc_srgba_premultiplied(
+        &mut self,
+        size: (usize, usize),
+        srgba_pixels: &[Color32],
+    ) -> TextureId {
+        self.inner
+            .lock()
+            .unwrap()
+            .alloc_srgba_premultiplied(size, srgba_pixels)
     }
 
     fn free(&mut self, id: TextureId) {
