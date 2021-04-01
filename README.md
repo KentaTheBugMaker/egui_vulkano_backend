@@ -11,6 +11,8 @@ this crate rendering only you need I/O egui integration e.g. [egui_winit_platfor
 ## known bug 
 None
 ## Update 
+ * target valkano 0.22.0 (v0.3.0)
+   
  * reduce crate size(v0.2.3)
  * remove vulkano_shader dependency extremely faster build time 
  * faster index and vertex buffer allocation

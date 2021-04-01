@@ -1,5 +1,5 @@
 use crate::render_pass::EguiRenderPassDesc;
-use crate::Pipeline;
+use crate::{PresentPipeline};
 use std::ffi::CString;
 use std::sync::Arc;
 use vulkano::descriptor::descriptor::{
@@ -146,11 +146,11 @@ unsafe impl PipelineLayoutDesc for PipelineLayout {
         0
     }
 
-    fn push_constants_range(&self, num: usize) -> Option<PipelineLayoutDescPcRange> {
+    fn push_constants_range(&self, _: usize) -> Option<PipelineLayoutDescPcRange> {
         None
     }
 }
-pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
+pub(crate) fn create_present_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<PresentPipeline> {
     let vs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/present_vert.spv")) }.unwrap();
     let fs_module =
@@ -188,7 +188,6 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             .render_pass(Subpass::from(render_pass, 0).unwrap())
             .depth_stencil_disabled()
             .fragment_shader(fs_entry, ())
-            .vertex_input_single_buffer()
             .vertex_shader(vs_entry, ())
             .primitive_topology(PrimitiveTopology::TriangleList)
             .front_face_clockwise()

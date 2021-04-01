@@ -28,12 +28,10 @@ use vulkano::format::Format;
 use vulkano::format::Format::R8G8B8A8Srgb;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
 use vulkano::framebuffer::Framebuffer;
-use vulkano::image::{
-    AttachmentImage, Dimensions, ImageUsage, ImageViewAccess, ImmutableImage, MipmapsCount,
-    SwapchainImage,
-};
+use vulkano::image::{AttachmentImage, ImageUsage, ImmutableImage, MipmapsCount, SwapchainImage, ImageDimensions};
+use vulkano::image::view::{ImageViewAbstract, ImageView};
 use vulkano::pipeline::GraphicsPipeline;
-use vulkano::pipeline::vertex::SingleBufferDefinition;
+use vulkano::pipeline::vertex::{SingleBufferDefinition, BufferlessDefinition};
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
@@ -41,6 +39,7 @@ use vulkano::sync::{GpuFuture, NowFuture};
 
 use crate::render_pass::EguiRenderPassDesc;
 use crate::shader::create_pipeline;
+use crate::present_shader::create_present_pipeline;
 
 mod render_pass;
 mod shader;
@@ -158,9 +157,10 @@ impl EguiVulkanoRenderPass {
         );
         let egui_texture = ImmutableImage::from_iter(
             [0u8].iter().copied(),
-            Dimensions::Dim2d {
+            ImageDimensions::Dim2d {
                 width: 1,
                 height: 1,
+                array_layers: 1
             },
             MipmapsCount::One,
             vulkano::format::Format::R8Unorm,
@@ -170,8 +170,9 @@ impl EguiVulkanoRenderPass {
         request_sender
             .send((TextureId::Egui, egui_texture.1))
             .unwrap();
+        let image_view=ImageView::new(egui_texture.0).unwrap();
         let egui_texture_descriptor_set =
-            Self::create_descriptor_set_from_view(pipeline.clone(), egui_texture.0);
+            Self::create_descriptor_set_from_view(pipeline.clone(), image_view);
         Self {
             pipeline,
             egui_texture_descriptor_set,
@@ -200,9 +201,10 @@ impl EguiVulkanoRenderPass {
         self.frame_buffers = image_views
             .iter()
             .map(|image| {
+                let view=ImageView::new(image.clone()).unwrap();
                 Arc::new(
                     Framebuffer::start(self.pipeline.clone())
-                        .add(image.clone())
+                        .add(view)
                         .unwrap()
                         .build()
                         .unwrap(),
@@ -238,7 +240,7 @@ impl EguiVulkanoRenderPass {
     /// If color attachment is some then render to any image e.g. AttachmentImage StorageImage
     pub fn create_command_buffer(
         &mut self,
-        color_attachment: Option<Arc<dyn ImageViewAccess + Send + Sync>>,
+        color_attachment: Option<Arc<dyn ImageViewAbstract + Send + Sync>>,
         image_num: Option<usize>,
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
@@ -392,9 +394,10 @@ impl EguiVulkanoRenderPass {
             .unwrap();
         let image = vulkano::image::ImmutableImage::from_buffer(
             staging_sub_buffer,
-            Dimensions::Dim2d {
+            ImageDimensions::Dim2d {
                 width: texture.width as u32,
                 height: texture.height as u32,
+                array_layers: 1
             },
             MipmapsCount::One,
             format,
@@ -404,7 +407,8 @@ impl EguiVulkanoRenderPass {
         self.request_sender
             .send((TextureId::Egui, image.1))
             .expect("failed to send system texture upload request");
-        let image_view = image.0 as Arc<dyn ImageViewAccess + Sync + Send>;
+        let image_view=ImageView::new(image.0).unwrap();
+        let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
         let pipeline = self.pipeline.clone();
         self.egui_texture_descriptor_set =
             Self::create_descriptor_set_from_view(pipeline, image_view);
@@ -458,7 +462,7 @@ impl EguiVulkanoRenderPass {
     }
     fn create_descriptor_set_from_view(
         pipeline: Arc<Pipeline>,
-        image_view: Arc<dyn ImageViewAccess + Sync + Send>,
+        image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
     ) -> Arc<dyn DescriptorSet + Send + Sync> {
         Arc::new(
             PersistentDescriptorSet::start(
@@ -508,9 +512,10 @@ impl EguiVulkanoRenderPass {
                     .unwrap();
                 let (image, future) = vulkano::image::ImmutableImage::from_buffer(
                     sub_buffer,
-                    Dimensions::Dim2d {
+                    ImageDimensions::Dim2d {
                         width: size.0 as u32,
                         height: size.1 as u32,
+                        array_layers: 1
                     },
                     MipmapsCount::One,
                     R8G8B8A8Srgb,
@@ -522,7 +527,8 @@ impl EguiVulkanoRenderPass {
                     .expect("faild to send image upload request");
                 self.image_transfer_request_list
                     .push(TextureId::User(id as u64));
-                let image_view = image as Arc<dyn ImageViewAccess + Sync + Send>;
+                let image_view=ImageView::new(image).unwrap();
+                let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
                 let desc = Self::create_descriptor_set_from_view(self.pipeline.clone(), image_view);
                 *slot = Some(UserTexture {
                     descriptor_set: desc,
@@ -536,7 +542,7 @@ impl EguiVulkanoRenderPass {
 
     pub fn register_vulkano_texture(
         &mut self,
-        image_view: Arc<dyn ImageViewAccess + Sync + Send>,
+        image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
     ) -> TextureId {
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
@@ -611,13 +617,13 @@ fn skip_by_clip(
 struct UserTexture {
     descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
 }
-
+type PresentPipeline = GraphicsPipeline<BufferlessDefinition, Box<dyn PipelineLayoutAbstract+Send+Sync>, Arc<RenderPass<EguiRenderPassDesc>>>;
 /// four thread for rendering
 /// thread 0 | thread 1| thread 2 | thread 3|
 /// management | image upload| command build |present+rendering |
 ///
 struct BuildRequest {
-    render_target: Arc<AttachmentImage>,
+    render_target:Arc<ImageView<Arc<AttachmentImage>>> ,
     paint_job: Vec<ClippedMesh>,
     screen_descriptor: ScreenDescriptor,
 }
@@ -657,6 +663,7 @@ impl MultiThreadRenderer {
         let render_request_channel: (Sender<RenderRequest>, Receiver<RenderRequest>) = std::sync::mpsc::channel();
         let build_request_channel: (Sender<BuildRequest>, Receiver<BuildRequest>) = std::sync::mpsc::channel();
 
+        let pipeline=create_present_pipeline(device.clone(),format);
 
         let clone_queue_1 = queue.clone();
         let rrs = render_request_channel.0;
@@ -719,9 +726,10 @@ impl MultiThreadRenderer {
             .unwrap();
     }
     pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) {
+        let view=ImageView::new(self.render_target.clone()).unwrap();
         self.build_request_sender
             .send(BuildRequest {
-                render_target: self.render_target.clone(),
+                render_target: view,
                 paint_job: job,
                 screen_descriptor: screen_desc,
             })
