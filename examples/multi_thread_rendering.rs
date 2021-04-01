@@ -1,29 +1,23 @@
-use vulkano::device::{Device, DeviceExtensions};
+use std::time::Instant;
 
+use chrono::Timelike;
+use egui::FontDefinitions;
+use egui_winit_platform::{Platform, PlatformDescriptor};
+use epi::App;
+use vulkano::device::{Device, DeviceExtensions};
+use vulkano::format::Format;
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
-
 use vulkano::swapchain::{
     ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
-    SwapchainCreationError,
 };
-
 use vulkano::sync::GpuFuture;
-
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use chrono::Timelike;
-use egui::FontDefinitions;
-use egui_vulkano_backend::{RenderingDispatcher, ScreenDescriptor};
-use egui_winit_platform::{Platform, PlatformDescriptor};
-use epi::App;
-
-use std::time::Instant;
-
-use vulkano::format::Format;
+use egui_vulkano_backend::{MultiThreadRenderer, ScreenDescriptor};
 
 /// A custom event type for the winit app.
 enum EguiEvent {
@@ -81,7 +75,7 @@ fn main() {
     .unwrap();
     let queue = queues.next().unwrap();
 
-    let (mut swapchain, images) = {
+    let (swapchain, images) = {
         let caps = surface.capabilities(physical).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         //     let alpha = CompositeAlpha::PreMultiplied;
@@ -98,7 +92,16 @@ fn main() {
             format,
             dimensions,
             1,
-            ImageUsage::color_attachment(),
+            ImageUsage {
+                transfer_source: false,
+                transfer_destination: true,
+                sampled: false,
+                storage: false,
+                color_attachment: true,
+                depth_stencil_attachment: false,
+                transient_attachment: false,
+                input_attachment: false,
+            },
             &queue,
             SurfaceTransform::Identity,
             alpha,
@@ -110,8 +113,7 @@ fn main() {
         .unwrap()
     };
 
-    let mut multi_thread_renderer =
-        RenderingDispatcher::build(device.clone(), queue.clone(), &images);
+    let mut multi_thread_renderer = MultiThreadRenderer::build(device.clone(), queue.clone(), swapchain.format());
 
     //init egui
     let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
@@ -130,7 +132,7 @@ fn main() {
     // Display the demo application that ships with egui.
     let mut demo_app = egui_demo_lib::WrapApp::default();
     //we want to initialize all framebuffers so we check it true
-    let mut recreate_swapchain = false;
+
     let http = std::sync::Arc::new(epi_http::EpiHttp {});
     let start_time = Instant::now();
     let mut previous_frame_time = None;
@@ -144,12 +146,7 @@ fn main() {
             } => {
                 *control_flow = ControlFlow::Exit;
             }
-            Event::WindowEvent {
-                event: WindowEvent::Resized(_),
-                ..
-            } => {
-                recreate_swapchain = true;
-            }
+
             Event::RedrawEventsCleared | Event::RedrawRequested(_) => {
                 platform.update_time(start_time.elapsed().as_secs_f64());
 
@@ -165,7 +162,8 @@ fn main() {
                         seconds_since_midnight: Some(seconds_since_midnight()),
                         native_pixels_per_point: Some(surface.window().scale_factor() as _),
                     },
-                    tex_allocator: &mut multi_thread_renderer,
+                    tex_allocator:
+                    &mut multi_thread_renderer,
                     http: http.clone(),
                     output: &mut app_output,
                     repaint_signal: repaint_signal.clone(),
@@ -183,32 +181,21 @@ fn main() {
                 previous_frame_time = Some(frame_time);
                 let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
                 previous_frame_end.as_mut().unwrap().cleanup_finished();
-
-                if recreate_swapchain {
-                    let dimensions: [u32; 2] = surface.window().inner_size().into();
-                    let (new_swapchain, new_images) =
-                        match swapchain.recreate_with_dimensions(dimensions) {
-                            Ok(r) => r,
-                            Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                        };
-                    swapchain = new_swapchain;
-                    multi_thread_renderer.create_frame_buffers(&new_images);
-                    recreate_swapchain = false;
-                }
-
                 let screen_descriptor = ScreenDescriptor {
                     physical_width: surface.window().inner_size().width,
                     physical_height: surface.window().inner_size().height,
                     scale_factor: surface.window().scale_factor() as f32,
                 };
 
-                multi_thread_renderer.upload_egui_texture(&platform.context().texture());
+                multi_thread_renderer.request_upload_egui_texture(&platform.context().texture());
 
                 println!("call mtr render");
-                recreate_swapchain = multi_thread_renderer.render(paint_jobs, screen_descriptor);
+                multi_thread_renderer.render(paint_jobs, screen_descriptor);
 
                 let epi::backend::AppOutput { quit, window_size } = app_output;
+                if let Some(size) = window_size {
+                    multi_thread_renderer.resize([size.x as u32, size.y as u32])
+                }
                 *control_flow = if quit {
                     ControlFlow::Exit
                 } else if output.needs_repaint {
@@ -220,10 +207,9 @@ fn main() {
 
                 *control_flow = ControlFlow::Poll
             }
-            Event::UserEvent(_) => {
-                surface.window().request_redraw();
+            _ => {
+                *control_flow = ControlFlow::Poll;
             }
-            _ => (),
         }
     });
 }

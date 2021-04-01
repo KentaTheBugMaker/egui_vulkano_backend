@@ -7,40 +7,44 @@
 //! * faster than official backend
 //! * lower cpu usage
 //! * lower memory usage
-mod render_pass;
-mod shader;
-
 extern crate vulkano;
 
-use crate::render_pass::EguiRenderPassDesc;
-use epi::egui;
-use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
-
 use std::sync::{Arc, Mutex};
-use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
-use vulkano::command_buffer::{
-    AutoCommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
-};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
-use vulkano::device::{Device, Queue};
-use vulkano::format::Format::R8G8B8A8Srgb;
-use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
-use vulkano::image::{Dimensions, ImageViewAccess, ImmutableImage, MipmapsCount, SwapchainImage};
-
-use crate::shader::create_pipeline;
-use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
-use vulkano::framebuffer::Framebuffer;
-
-use iter_vec::ExactSizedIterVec;
 use std::sync::mpsc::{Receiver, Sender};
 
+use epi::egui;
+use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
+use iter_vec::ExactSizedIterVec;
+use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
+use vulkano::command_buffer::{
+    AutoCommandBuffer, CommandBuffer, CommandBufferExecFuture,
+    DynamicState, SubpassContents,
+};
+use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
+use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::device::{Device, Queue};
+use vulkano::format::Format;
+use vulkano::format::Format::R8G8B8A8Srgb;
+use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
+use vulkano::framebuffer::Framebuffer;
+use vulkano::image::{
+    AttachmentImage, Dimensions, ImageUsage, ImageViewAccess, ImmutableImage, MipmapsCount,
+    SwapchainImage,
+};
+use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
-use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain::{AcquireError, Swapchain, SwapchainAcquireFuture};
+use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::{GpuFuture, NowFuture};
+
+use crate::render_pass::EguiRenderPassDesc;
+use crate::shader::create_pipeline;
+
+mod render_pass;
+mod shader;
+mod present_shader;
 
 #[derive(Default, Debug, Copy, Clone)]
 struct EguiVulkanoVertex {
@@ -607,137 +611,130 @@ fn skip_by_clip(
 struct UserTexture {
     descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
 }
+
 /// four thread for rendering
 /// thread 0 | thread 1| thread 2 | thread 3|
 /// management | image upload| command build |present+rendering |
 ///
-
-pub struct RenderingDispatcher<Window: 'static + Send + Sync> {
-    inner: Arc<Mutex<EguiVulkanoRenderPass>>,
-    swap_chain: Arc<Swapchain<Window>>,
-    build_request_sender: Sender<BuildRequest>,
-    render_request_sender: Sender<RenderRequest<Window>>,
-    command_buffer_receiver: Receiver<CommandBuffer>,
+struct BuildRequest {
+    render_target: Arc<AttachmentImage>,
+    paint_job: Vec<ClippedMesh>,
+    screen_descriptor: ScreenDescriptor,
 }
-type RenderRequest<Window> = (AutoCommandBuffer, SwapchainAcquireFuture<Window>);
-type BuildRequest = (usize, Vec<ClippedMesh>, ScreenDescriptor);
-type CommandBuffer = AutoCommandBuffer;
-impl<Window: Send + Sync> RenderingDispatcher<Window> {
-    pub fn build(
-        device: Arc<Device>,
-        queue: Arc<Queue>,
-        swap_chain_images: &[Arc<SwapchainImage<Window>>],
-    ) -> Self {
-        let swap_chain = swap_chain_images[0].swapchain().clone();
-        let format = swap_chain.format();
-        let inner = Arc::new(Mutex::new(EguiVulkanoRenderPass::new(
-            device,
-            queue.clone(),
+
+struct RenderRequest {
+    command_buffer: AutoCommandBuffer,
+}
+
+pub struct MultiThreadRenderer {
+    inner: Arc<Mutex<EguiVulkanoRenderPass>>,
+    render_target: Arc<AttachmentImage>,
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+    build_request_sender: Sender<BuildRequest>,
+    format: Format,
+}
+
+impl MultiThreadRenderer {
+    pub fn build(device: Arc<Device>, queue: Arc<Queue>, format: Format) -> Self {
+        let render_target = AttachmentImage::with_usage(
+            device.clone(),
+            [1, 1],
             format,
-        )));
-        inner
-            .lock()
-            .unwrap()
-            .create_frame_buffers(&swap_chain_images);
-        //rendering request channel
-        let (render_request_sender, render_request_receiver): (
-            Sender<RenderRequest<Window>>,
-            Receiver<RenderRequest<Window>>,
-        ) = std::sync::mpsc::channel();
+            ImageUsage {
+                transfer_source: true,
+                transfer_destination: false,
+                sampled: false,
+                storage: false,
+                color_attachment: true,
+                depth_stencil_attachment: false,
+                transient_attachment: false,
+                input_attachment: false,
+            },
+        )
+            .unwrap();
+        let inner = Arc::new(Mutex::new(EguiVulkanoRenderPass::new(device.clone(), queue.clone(), format)));
+        let render_request_channel: (Sender<RenderRequest>, Receiver<RenderRequest>) = std::sync::mpsc::channel();
+        let build_request_channel: (Sender<BuildRequest>, Receiver<BuildRequest>) = std::sync::mpsc::channel();
 
-        let (build_request_sender, build_request_receiver): (
-            Sender<BuildRequest>,
-            Receiver<BuildRequest>,
-        ) = std::sync::mpsc::channel();
-        let (command_buffer_sender, command_buffer_receiver) = std::sync::mpsc::channel();
-        // spawn threads
 
-        //rendering and present thread
-        std::thread::spawn(move || {
-            for render_request in render_request_receiver.iter() {
-                //   inner.present_to_screen(command_buffer,future);
-
-                let acquire_future = render_request.1;
-                let command = render_request.0;
-                let swap_chain = acquire_future.swapchain().clone();
-                let image_id = acquire_future.image_id();
-
-                if let Ok(ok) = acquire_future
-                    .then_execute(queue.clone(), command)
-                    .unwrap()
-                    .then_swapchain_present(queue.clone(), swap_chain, image_id)
-                    .then_signal_fence_and_flush()
-                {
-                    if ok.wait(None).is_ok() {};
-                }
-            }
-        });
-        // command build thread
+        let clone_queue_1 = queue.clone();
+        let rrs = render_request_channel.0;
+        let rrr = render_request_channel.1;
+        let brs = build_request_channel.0;
+        let brr = build_request_channel.1;
         let clone_inner = inner.clone();
         std::thread::spawn(move || {
-            for (x, paint_job, screen_descriptor) in build_request_receiver.iter() {
+            loop {
+                let build_request = brr.recv().unwrap();
                 let command = clone_inner.lock().unwrap().create_command_buffer(
+                    Some(build_request.render_target),
                     None,
-                    Some(x),
-                    &paint_job,
-                    &screen_descriptor,
+                    &build_request.paint_job,
+                    &build_request.screen_descriptor,
                 );
-                command_buffer_sender.send(command).unwrap();
+                rrs
+                    .send(RenderRequest {
+                        command_buffer: command,
+                    })
+                    .unwrap();
+            }
+        });
+        std::thread::spawn(move || {
+            for render_request in rrr.iter() {
+                render_request
+                    .command_buffer
+                    .execute(clone_queue_1.clone())
+                    .unwrap()
+                    .flush()
+                    .unwrap();
             }
         });
         Self {
             inner,
-            swap_chain,
-            build_request_sender,
-            render_request_sender,
-            command_buffer_receiver,
+            render_target,
+            device,
+            queue,
+
+            build_request_sender: brs,
+            format,
         }
     }
-    pub fn create_frame_buffers(&self, images: &[Arc<SwapchainImage<Window>>]) {
-        self.inner.lock().unwrap().create_frame_buffers(images);
+    pub fn resize(&mut self, dimensions: [u32; 2]) {
+        self.render_target = AttachmentImage::with_usage(
+            self.device.clone(),
+            dimensions,
+            self.format,
+            ImageUsage {
+                transfer_source: true,
+                transfer_destination: false,
+                sampled: false,
+                storage: false,
+                color_attachment: true,
+                depth_stencil_attachment: false,
+                transient_attachment: false,
+                input_attachment: false,
+            },
+        )
+            .unwrap();
     }
-    pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) -> bool {
-        //get new frame
-        let (image_num, _sub_optimal, future) =
-            match vulkano::swapchain::acquire_next_image(self.swap_chain.clone(), None) {
-                Ok(r) => r,
-                Err(AcquireError::OutOfDate) => {
-                    //recreate_swapchain = true;
-                    println!("out of date");
-                    return true;
-                }
-                Err(e) => panic!("Failed to acquire next image: {:?}", e),
-            };
-        println!("acquire next image");
-        //add new rendering request and pull command
-
+    pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) {
         self.build_request_sender
-            .send((image_num, job, screen_desc))
+            .send(BuildRequest {
+                render_target: self.render_target.clone(),
+                paint_job: job,
+                screen_descriptor: screen_desc,
+            })
             .unwrap();
-        println!("command build request sent ");
-        let command_buffer = self.command_buffer_receiver.recv().unwrap();
-        self.render_request_sender
-            .send((command_buffer, future))
-            .unwrap();
-        false
     }
-    pub fn upload_egui_texture(&self, texture: &epi::egui::Texture) {
-        self.inner
-            .lock()
-            .unwrap()
-            .request_upload_egui_texture(texture)
+    pub fn request_upload_egui_texture(&self, texture: &Texture) {
+        self.inner.lock().unwrap().request_upload_egui_texture(texture)
     }
 }
-impl<W: Send + Sync> epi::TextureAllocator for RenderingDispatcher<W> {
-    fn alloc_srgba_premultiplied(
-        &mut self,
-        size: (usize, usize),
-        srgba_pixels: &[Color32],
-    ) -> TextureId {
-        self.inner
-            .lock()
-            .unwrap()
-            .alloc_srgba_premultiplied(size, srgba_pixels)
+
+impl epi::TextureAllocator for MultiThreadRenderer {
+    fn alloc_srgba_premultiplied(&mut self, size: (usize, usize), srgba_pixels: &[Color32]) -> TextureId {
+        self.inner.lock().unwrap().alloc_srgba_premultiplied(size, srgba_pixels)
     }
 
     fn free(&mut self, id: TextureId) {

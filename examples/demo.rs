@@ -1,29 +1,25 @@
-use vulkano::device::{Device, DeviceExtensions};
+use std::time::Instant;
 
+use chrono::Timelike;
+use egui::FontDefinitions;
+use egui_winit_platform::{Platform, PlatformDescriptor};
+use epi::App;
+use vulkano::device::{Device, DeviceExtensions};
+use vulkano::format::Format;
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
-
 use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
     SwapchainCreationError,
 };
-
 use vulkano::sync::GpuFuture;
-
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use chrono::Timelike;
-use egui::FontDefinitions;
 use egui_vulkano_backend::ScreenDescriptor;
-use egui_winit_platform::{Platform, PlatformDescriptor};
-use epi::App;
-
-use std::time::Instant;
-use vulkano::format::Format;
 
 /// A custom event type for the winit app.
 enum EguiEvent {
@@ -219,12 +215,16 @@ fn main() {
                 };
                 egui_render_pass.request_upload_egui_texture(&platform.context().texture());
                 //      egui_render_pass.upload_pending_textures();
+                let command_build_start = Instant::now();
                 let render_command = egui_render_pass.create_command_buffer(
                     None,
                     Some(image_num),
                     &paint_jobs,
                     &screen_descriptor,
                 );
+                let command_build_end = Instant::now();
+                let command_build_time = command_build_end - command_build_start;
+                println!("Command build time {}", command_build_time.as_secs_f32());
                 egui_render_pass.present_to_screen(render_command, acquire_future);
                 *control_flow = ControlFlow::Poll
             }
