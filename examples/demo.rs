@@ -19,7 +19,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::ScreenDescriptor;
+use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
 
 /// A custom event type for the winit app.
 enum EguiEvent {
@@ -216,9 +216,9 @@ fn main() {
                 egui_render_pass.request_upload_egui_texture(&platform.context().texture());
                 //      egui_render_pass.upload_pending_textures();
                 let command_build_start = Instant::now();
+                let render_target = RenderTarget::FrameBufferIndex(image_num);
                 let render_command = egui_render_pass.create_command_buffer(
-                    None,
-                    Some(image_num),
+                    render_target,
                     &paint_jobs,
                     &screen_descriptor,
                 );

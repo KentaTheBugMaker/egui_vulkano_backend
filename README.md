@@ -11,6 +11,9 @@ this crate rendering only you need I/O egui integration e.g. [egui_winit_platfor
 ## known bug 
 None
 ## Update 
+ * api breaking change see [port guide](port_guide_v030.md)
+ * add new function that support recreating and initializing render area (v0.3.0)
+   
  * target vulkano 0.22.0 (v0.3.0)
    
  * reduce crate size(v0.2.3)

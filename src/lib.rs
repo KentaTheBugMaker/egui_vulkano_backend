@@ -3,7 +3,6 @@
 //! This crate have some features
 //! * background user texture upload
 //! * map vulkano texture to user texture
-//! * [easily extend to multi thread rendering](https://github.com/t18b219k/egui_vulkano_backend/blob/master/examples/multi_thread_rendering.rs)
 //! * faster than official backend
 //! * lower cpu usage
 //! * lower memory usage
@@ -23,17 +22,19 @@ use vulkano::command_buffer::{
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
-use vulkano::format::Format;
-use vulkano::format::Format::R8G8B8A8Srgb;
+
 use vulkano::framebuffer::Framebuffer;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
-use vulkano::image::view::{ImageView, ImageViewAbstract};
-use vulkano::image::{ImageDimensions, ImmutableImage, MipmapsCount, SwapchainImage};
+use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
+use vulkano::image::{
+    AttachmentImage, ImageCreationError, ImageDimensions, ImageUsage, ImmutableImage, MipmapsCount,
+    SwapchainImage,
+};
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::swapchain::{AcquireError, Swapchain, SwapchainAcquireFuture, SwapchainCreationError};
+use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::{GpuFuture, NowFuture};
 
 use crate::render_pass::EguiRenderPassDesc;
@@ -229,32 +230,25 @@ impl EguiVulkanoRenderPass {
     }
 
     /// translate egui rendering request to vulkano AutoCommandBuffer
-    ///
-    /// color attachment is render target.
-    ///
-    /// If color_attachment is none then render to self framebuffer and image num must Some
-    ///
-    /// If color attachment is some then render to any image e.g. AttachmentImage StorageImage
     pub fn create_command_buffer(
         &mut self,
-        color_attachment: Option<Arc<dyn ImageViewAbstract + Send + Sync>>,
-        image_num: Option<usize>,
+        render_target: RenderTarget,
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
     ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
         let mut exact_sized_iter_vec_vertices = ExactSizedIterVec::new();
         let mut exact_sized_iter_vec_indices = ExactSizedIterVec::new();
-        let framebuffer = if let Some(color_attachment) = color_attachment {
-            Arc::new(
+        let framebuffer = match render_target {
+            RenderTarget::ColorAttachment(color_attachment) => Arc::new(
                 vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
                     .add(color_attachment)
                     .unwrap()
                     .build()
                     .expect("failed to create frame buffer"),
-            )
-        } else {
-            self.frame_buffers[image_num.unwrap()].clone()
+            ),
+            RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
         };
+
         let logical = screen_descriptor.logical_size();
 
         let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
@@ -478,7 +472,7 @@ impl EguiVulkanoRenderPass {
                 .unwrap()
                 .as_ref()
                 .unwrap()
-                .descriptor_set
+                .0
                 .clone()
         } else {
             self.egui_texture_descriptor_set.clone()
@@ -495,8 +489,7 @@ impl EguiVulkanoRenderPass {
         if let TextureId::User(id) = id {
             // test Texture slot allocated
             if let Some(slot) = self.user_textures.get_mut(id as usize) {
-                // cast slice
-                //
+                // SAFETY this is gpu send only so i can this .
                 let pixels = unsafe {
                     std::slice::from_raw_parts(
                         srgba_pixels.as_ptr() as *const u8,
@@ -515,21 +508,19 @@ impl EguiVulkanoRenderPass {
                         array_layers: 1,
                     },
                     MipmapsCount::One,
-                    R8G8B8A8Srgb,
+                    vulkano::format::Format::R8G8B8A8Srgb,
                     self.queue.clone(),
                 )
                 .unwrap();
                 self.request_sender
                     .send((TextureId::User(id), future))
-                    .expect("faild to send image upload request");
+                    .expect("failed to send image copy request");
                 self.image_transfer_request_list
                     .push(TextureId::User(id as u64));
                 let image_view = ImageView::new(image).unwrap();
                 let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
                 let desc = Self::create_descriptor_set_from_view(self.pipeline.clone(), image_view);
-                *slot = Some(UserTexture {
-                    descriptor_set: desc,
-                });
+                *slot = Some(UserTexture(desc));
             }
         }
     }
@@ -545,12 +536,106 @@ impl EguiVulkanoRenderPass {
         if let egui::TextureId::User(id) = id {
             let pipeline = self.pipeline.clone();
             if let Some(slot) = self.user_textures.get_mut(id as usize) {
-                *slot = Some(UserTexture {
-                    descriptor_set: Self::create_descriptor_set_from_view(pipeline, image_view),
-                });
+                *slot = Some(UserTexture(Self::create_descriptor_set_from_view(
+                    pipeline, image_view,
+                )));
             }
+        } else {
+            unreachable!("EguiVulkanoRenderPass::alloc_user_texture returned TextureId::Egui")
         }
         id
+    }
+    /// init render area with given dimensions.
+    ///
+    /// image format is R8G8B8A8Srgb.
+    ///
+    /// enabled image usage is below.
+    /// * sampled
+    /// * color_attachment
+    ///
+    ///  this is shortcut function for register_vulkano_texture
+    ///
+    pub fn init_vulkano_texture_with_dimensions(
+        &mut self,
+        dimensions: [u32; 2],
+    ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
+        let usage = ImageUsage {
+            transfer_source: false,
+            transfer_destination: false,
+            sampled: true,
+            storage: false,
+            color_attachment: true,
+            depth_stencil_attachment: false,
+            transient_attachment: false,
+            input_attachment: false,
+        };
+        match AttachmentImage::with_usage(
+            self.device.clone(),
+            dimensions,
+            vulkano::format::Format::R8G8B8A8Srgb,
+            usage,
+        ) {
+            Ok(image) => {
+                let texture_id = self.alloc_user_texture();
+                if let TextureId::User(id) = texture_id {
+                    if let Some(slot) = self.user_textures.get_mut(id as usize) {
+                        match ImageView::new(image.clone()) {
+                            Ok(image_view) => {
+                                *slot = Some(UserTexture(Self::create_descriptor_set_from_view(
+                                    self.pipeline.clone(),
+                                    image_view,
+                                )));
+                                Ok((texture_id, image))
+                            }
+                            Err(err) => Err(InitRenderAreaError::ImageViewCreationError(err)),
+                        }
+                    } else {
+                        unreachable!("EguiVulkanoRenderPass::alloc_user_texture() returned uninitialized texture_id")
+                    }
+                } else {
+                    unreachable!(
+                        "EguiVulkanoRenderPass::alloc_user_texture() returned TextureId::Egui"
+                    )
+                }
+            }
+            Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
+        }
+    }
+
+    ///  recreate vulkano texture.
+    ///
+    ///  usable for render target resize.
+    ///
+    ///  this function create descriptor set for image, so you do not have to call register_vulkano_texture
+    pub fn recreate_vulkano_texture_with_dimensions(
+        &mut self,
+        texture_id: TextureId,
+        dimensions: [u32; 2],
+    ) -> Result<Arc<AttachmentImage>, RecreateErrors> {
+        let descriptor_set = self.get_descriptor_set(texture_id);
+        let image_access = descriptor_set.image(0).unwrap().0.image();
+        let format = image_access.format();
+        let usage = image_access.inner().image.usage();
+        match AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage) {
+            Ok(image) => match ImageView::new(image.clone()) {
+                Ok(view) => {
+                    let desc = Self::create_descriptor_set_from_view(self.pipeline.clone(), view);
+                    match texture_id {
+                        TextureId::User(id) => {
+                            if let Some(slot) = self.user_textures.get_mut(id as usize) {
+                                *slot = Some(UserTexture(desc));
+                                Ok(image)
+                            } else {
+                                Err(RecreateErrors::TextureIdNotFound(texture_id))
+                            }
+                        }
+                        _ => Err(RecreateErrors::TextureIdIsEgui),
+                    }
+                }
+                Err(err) => Err(RecreateErrors::ImageViewCreationError(err)),
+            },
+            Err(err) => Err(RecreateErrors::ImageCreationError(err)),
+        }
     }
 }
 impl epi::TextureAllocator for EguiVulkanoRenderPass {
@@ -610,152 +695,22 @@ fn skip_by_clip(
         }
     })
 }
-
-struct UserTexture {
-    descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
+#[derive(Debug, Clone)]
+pub enum RecreateErrors {
+    TextureIdIsEgui,
+    TextureIdNotFound(TextureId),
+    ImageViewCreationError(ImageViewCreationError),
+    ImageCreationError(ImageCreationError),
 }
-
-/// four thread for rendering
-/// thread 0 | thread 1| thread 2 | thread 3|
-/// management | image upload| command build |present+rendering |
-///
-struct BuildRequest {
-    render_target: usize,
-    paint_job: Vec<ClippedMesh>,
-    screen_descriptor: ScreenDescriptor,
+#[derive(Debug, Clone)]
+pub enum InitRenderAreaError {
+    ImageViewCreationError(ImageViewCreationError),
+    ImageCreationError(ImageCreationError),
 }
-
-struct RenderRequest {
-    command_buffer: AutoCommandBuffer,
+pub enum RenderTarget {
+    /// render to texture or any other use
+    ColorAttachment(Arc<dyn ImageViewAbstract + Send + Sync>),
+    /// render to own framebuffer
+    FrameBufferIndex(usize),
 }
-
-pub struct MultiThreadRenderer<Window> {
-    inner: Arc<Mutex<EguiVulkanoRenderPass>>,
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-    build_request_sender: Sender<BuildRequest>,
-    render_request_receiver: Receiver<RenderRequest>,
-    swap_chain: Arc<Swapchain<Window>>,
-}
-
-impl<Window: Send + Sync + 'static> MultiThreadRenderer<Window> {
-    pub fn build(
-        device: Arc<Device>,
-        queue: Arc<Queue>,
-        swap_chain: Arc<Swapchain<Window>>,
-        swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
-        format: Format,
-    ) -> Self {
-        let inner = Arc::new(Mutex::new(EguiVulkanoRenderPass::new(
-            device.clone(),
-            queue.clone(),
-            format,
-        )));
-        let render_request_channel: (Sender<RenderRequest>, Receiver<RenderRequest>) =
-            std::sync::mpsc::channel();
-        let build_request_channel: (Sender<BuildRequest>, Receiver<BuildRequest>) =
-            std::sync::mpsc::channel();
-        let rrs = render_request_channel.0;
-        let rrr = render_request_channel.1;
-        let brs = build_request_channel.0;
-        let brr = build_request_channel.1;
-        let clone_inner = inner.clone();
-        inner
-            .lock()
-            .unwrap()
-            .create_frame_buffers(&swap_chain_images);
-        std::thread::spawn(move || loop {
-            let build_request = brr.recv().unwrap();
-            let command = clone_inner.lock().unwrap().create_command_buffer(
-                None,
-                Some(build_request.render_target),
-                &build_request.paint_job,
-                &build_request.screen_descriptor,
-            );
-            rrs.send(RenderRequest {
-                command_buffer: command,
-            })
-            .unwrap();
-        });
-
-        Self {
-            inner,
-            device,
-            queue,
-            build_request_sender: brs,
-            render_request_receiver: rrr,
-            swap_chain,
-        }
-    }
-    pub fn resize(&mut self, dimensions: [u32; 2]) {
-        let new = self.swap_chain.recreate_with_dimensions(dimensions);
-        let images = match new {
-            Ok(r) => {
-                self.swap_chain = r.0;
-                r.1
-            }
-            Err(SwapchainCreationError::UnsupportedDimensions) => return,
-            Err(e) => {
-                panic!("Failed to recreate swap chain : {:?}", e)
-            }
-        };
-        self.inner.lock().unwrap().create_frame_buffers(&images);
-    }
-    pub fn render(&mut self, job: Vec<ClippedMesh>, screen_desc: ScreenDescriptor) -> bool {
-        let (image_num, sub_opt, future) =
-            match vulkano::swapchain::acquire_next_image(self.swap_chain.clone(), None) {
-                Ok(r) => r,
-                Err(AcquireError::OutOfDate) => return true,
-                Err(e) => {
-                    panic!("Failed to acquire next image : {:?}", e)
-                }
-            };
-        if sub_opt {
-            return true;
-        }
-
-        self.build_request_sender
-            .send(BuildRequest {
-                render_target: image_num,
-                paint_job: job,
-                screen_descriptor: screen_desc,
-            })
-            .unwrap();
-
-        let now = vulkano::sync::now(self.device.clone());
-        // sync rendering finish
-        let cmd_buf = self.render_request_receiver.recv().unwrap();
-        now.join(future)
-            .then_execute(self.queue.clone(), cmd_buf.command_buffer)
-            .unwrap()
-            .then_swapchain_present(self.queue.clone(), self.swap_chain.clone(), image_num)
-            .then_signal_fence_and_flush()
-            .unwrap()
-            .wait(None)
-            .unwrap();
-        false
-    }
-    pub fn request_upload_egui_texture(&self, texture: &Texture) {
-        self.inner
-            .lock()
-            .unwrap()
-            .request_upload_egui_texture(texture)
-    }
-}
-
-impl<Window> epi::TextureAllocator for MultiThreadRenderer<Window> {
-    fn alloc_srgba_premultiplied(
-        &mut self,
-        size: (usize, usize),
-        srgba_pixels: &[Color32],
-    ) -> TextureId {
-        self.inner
-            .lock()
-            .unwrap()
-            .alloc_srgba_premultiplied(size, srgba_pixels)
-    }
-
-    fn free(&mut self, id: TextureId) {
-        self.inner.lock().unwrap().free(id)
-    }
-}
+struct UserTexture(Arc<dyn DescriptorSet + Send + Sync>);
