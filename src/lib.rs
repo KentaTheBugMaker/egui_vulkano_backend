@@ -41,6 +41,8 @@ use crate::render_pass::EguiRenderPassDesc;
 use crate::shader::create_pipeline;
 
 mod render_pass;
+#[cfg(feature = "winit_runner")]
+pub mod runner;
 mod shader;
 
 #[derive(Default, Debug, Copy, Clone)]
@@ -552,16 +554,20 @@ impl EguiVulkanoRenderPass {
     /// enabled image usage is below.
     /// * sampled
     /// * color_attachment
+    /// * transfer_destination
     ///
     ///  this is shortcut function for register_vulkano_texture
     ///
+    /// example usage
+    /// * model viewer
+    /// * video playback
     pub fn init_vulkano_texture_with_dimensions(
         &mut self,
         dimensions: [u32; 2],
     ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
         let usage = ImageUsage {
             transfer_source: false,
-            transfer_destination: false,
+            transfer_destination: true,
             sampled: true,
             storage: false,
             color_attachment: true,
