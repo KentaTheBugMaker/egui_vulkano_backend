@@ -193,7 +193,7 @@ impl EguiVulkanoRenderPass {
         }
     }
 
-    /// you must call when SwapChain or render target resize or before first create_command_buffer call
+    /// you must call when SwapChain  resize or before first create_command_buffer call
     pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
         &mut self,
         image_views: &[Arc<SwapchainImage<Wnd>>],
