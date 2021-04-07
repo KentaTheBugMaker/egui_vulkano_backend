@@ -1,5 +1,10 @@
 //! io/render egui integration  for vulkano
 //!
+//! if you use winit_runner feature needed
+//!
+//! if you want http support you need to enable runner_http
+//!
+
 use crate::{EguiVulkanoRenderPass, RenderTarget, ScreenDescriptor};
 use chrono::Timelike;
 use egui_winit_platform::{Platform, PlatformDescriptor};
