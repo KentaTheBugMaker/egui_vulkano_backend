@@ -5,12 +5,12 @@ use chrono::Timelike;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::backend::AppOutput;
 use epi::IntegrationInfo;
-use std::borrow::Cow;
+
 use std::time::Instant;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::format::Format;
 use vulkano::image::ImageUsage;
-use vulkano::instance::{ApplicationInfo, PhysicalDevice, Version};
+use vulkano::instance::PhysicalDevice;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
     SwapchainCreationError,
@@ -31,15 +31,9 @@ impl epi::RepaintSignal for VulkanoRepaintSignal {
 }
 pub fn run(mut app: Box<dyn epi::App>) {
     let event_loop = winit::event_loop::EventLoop::with_user_event();
-    let name = app.name();
     let required_extensions = vulkano_win::required_extensions();
     let instance = vulkano::instance::Instance::new(
-        Some(&ApplicationInfo {
-            application_name: Some(Cow::from(name)),
-            application_version: None,
-            engine_name: Some(Cow::from("egui_vulkano_winit_runner")),
-            engine_version: None,
-        }),
+        Some(&vulkano::app_info_from_cargo_toml!()),
         &required_extensions,
         None,
     )
@@ -162,16 +156,12 @@ pub fn run(mut app: Box<dyn epi::App>) {
             previous_frame_time = Some(frame_time);
             // egui end
             egui_render_pass.request_upload_egui_texture(&platform.context().texture());
-            let command_build_start = Instant::now();
             let render_target = RenderTarget::FrameBufferIndex(image_num);
             let render_command = egui_render_pass.create_command_buffer(
                 render_target,
                 &clipped_meshes,
                 &screen_descriptor,
             );
-            let command_build_end = Instant::now();
-            let command_build_time = command_build_end - command_build_start;
-            println!("Command build time {}", command_build_time.as_secs_f32());
             egui_render_pass.present_to_screen(render_command, acquire_future);
             {
                 let AppOutput { quit, window_size } = app_output;

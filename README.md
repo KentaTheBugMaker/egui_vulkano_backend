@@ -7,10 +7,11 @@
 
 Backend code to run [egui](https://crates.io/crates/egui) using [vulkano](https://crates.io/crates/vulkano).
 
-this crate rendering only you need I/O egui integration e.g. [egui_winit_platform](https://crates.io/crates/egui_winit_platform) 
+This crate has http and runner support by enabling winit_runner, runner_http , but you can  use any io integration.  
 ## known bug 
 None
 ## Update 
+ * add egui runner (v0.3.0)
  * api breaking change see [port guide](port_guide_v030.md)
  * add new function that support recreating and initializing render area (v0.3.0)
    
@@ -38,18 +39,18 @@ cargo run --example demo
 ```
 ## Version list
 
-|egui_vulkano_backend |vulkano |vulkano-shader |
-|---------------------|--------|---------------|
-|0.0.1 | 0.20.0|0.20.0|
-|0.0.2 | 0.20.0|0.20.0|
-|0.0.3 | 0.21.0|0.20.0|
-|0.0.4 | 0.21.0|none|
-|0.0.5 | 0.21.0|none|
-|0.1.0 | 0.21.0|none|
-|0.2.0 | 0.21.0|none|
-|0.2.1 | 0.21.0|none|
-|0.2.2 | 0.21.0|none|
-|0.3.0 | 0.22.0|none|
+|egui_vulkano_backend|egui |vulkano |vulkano-shader |
+|-----|------|------|------|
+|0.0.1|0.10.0|0.20.0|0.20.0|
+|0.0.2|0.10.0|0.20.0|0.20.0|
+|0.0.3|0.10.0|0.21.0|0.21.0|
+|0.0.4|0.10.0|0.21.0|none|
+|0.0.5|0.10.0|0.21.0|none|
+|0.1.0|0.10.0|0.21.0|none|
+|0.2.0|0.10.0|0.21.0|none|
+|0.2.1|0.10.0|0.21.0|none|
+|0.2.2|0.10.0|0.21.0|none|
+|0.3.0|0.10.0|0.22.0|none|
 ## License
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
 See [LICENSE-APACHE](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-APACHE), [LICENSE-MIT](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-MIT).
