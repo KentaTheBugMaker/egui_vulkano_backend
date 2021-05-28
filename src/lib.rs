@@ -530,7 +530,7 @@ impl EguiVulkanoRenderPass {
     ///
     /// Usable for render to image rectangle
 
-    pub fn register_vulkano_texture(
+    pub fn register_vulkano_image_view(
         &mut self,
         image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
     ) -> TextureId {
@@ -556,12 +556,12 @@ impl EguiVulkanoRenderPass {
     /// * color_attachment
     /// * transfer_destination
     ///
-    ///  this is shortcut function for register_vulkano_texture
+    ///  this is shortcut function for register_vulkano_image_view
     ///
     /// example usage
     /// * model viewer
     /// * video playback
-    pub fn init_vulkano_texture_with_dimensions(
+    pub fn init_vulkano_image_with_dimensions(
         &mut self,
         dimensions: [u32; 2],
     ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
@@ -607,12 +607,49 @@ impl EguiVulkanoRenderPass {
             Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
         }
     }
-
+    pub fn init_vulkano_image_with_parameters(
+        &mut self,
+        dimensions: [u32; 2],
+        usage:ImageUsage,
+        format:vulkano::format::Format,
+    ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
+        match AttachmentImage::with_usage(
+            self.device.clone(),
+            dimensions,
+            format,
+            usage,
+        ) {
+            Ok(image) => {
+                let texture_id = self.alloc_user_texture();
+                if let TextureId::User(id) = texture_id {
+                    if let Some(slot) = self.user_textures.get_mut(id as usize) {
+                        match ImageView::new(image.clone()) {
+                            Ok(image_view) => {
+                                *slot = Some(UserTexture(Self::create_descriptor_set_from_view(
+                                    self.pipeline.clone(),
+                                    image_view,
+                                )));
+                                Ok((texture_id, image))
+                            }
+                            Err(err) => Err(InitRenderAreaError::ImageViewCreationError(err)),
+                        }
+                    } else {
+                        unreachable!("EguiVulkanoRenderPass::alloc_user_texture() returned uninitialized texture_id")
+                    }
+                } else {
+                    unreachable!(
+                        "EguiVulkanoRenderPass::alloc_user_texture() returned TextureId::Egui"
+                    )
+                }
+            }
+            Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
+        }
+    }
     ///  recreate vulkano texture.
     ///
     ///  usable for render target resize.
     ///
-    ///  this function create descriptor set for image, so you do not have to call register_vulkano_texture
+    ///  this function create descriptor set for image, so you do not have to call [register_vulkano_image_view]
     pub fn recreate_vulkano_texture_with_dimensions(
         &mut self,
         texture_id: TextureId,
