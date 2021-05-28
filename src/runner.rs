@@ -13,13 +13,10 @@ use epi::IntegrationInfo;
 
 use std::time::Instant;
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::format::Format;
+
 use vulkano::image::ImageUsage;
 use vulkano::instance::PhysicalDevice;
-use vulkano::swapchain::{
-    AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
-    SwapchainCreationError,
-};
+use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano_win::VkSurfaceBuild;
 use winit::event::WindowEvent;
 use winit::event_loop::ControlFlow;
@@ -35,7 +32,6 @@ impl epi::RepaintSignal for VulkanoRepaintSignal {
     }
 }
 pub fn run(mut app: Box<dyn epi::App>) {
-    let event_loop = winit::event_loop::EventLoop::with_user_event();
     let required_extensions = vulkano_win::required_extensions();
     let instance = vulkano::instance::Instance::new(
         Some(&vulkano::app_info_from_cargo_toml!()),
@@ -46,6 +42,8 @@ pub fn run(mut app: Box<dyn epi::App>) {
     let physical_device = PhysicalDevice::enumerate(&instance)
         .next()
         .expect("Failed to get physical device");
+
+    let event_loop = winit::event_loop::EventLoop::with_user_event();
     let surface = WindowBuilder::new()
         .with_title(app.name())
         .build_vk_surface(&event_loop, instance.clone())
@@ -70,30 +68,19 @@ pub fn run(mut app: Box<dyn epi::App>) {
     let (mut swapchain, images) = {
         let caps = surface.capabilities(physical_device).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        //     let alpha = CompositeAlpha::PreMultiplied;
-        assert!(&caps
-            .supported_formats
-            .contains(&(Format::B8G8R8A8Srgb, ColorSpace::SrgbNonLinear)));
-        let format = Format::B8G8R8A8Srgb;
+        let format = caps.supported_formats.iter().next().unwrap().0;
         let dimensions: [u32; 2] = surface.window().inner_size().into();
 
-        Swapchain::new(
-            device.clone(),
-            surface.clone(),
-            caps.min_image_count,
-            format,
-            dimensions,
-            1,
-            ImageUsage::color_attachment(),
-            &queue,
-            SurfaceTransform::Identity,
-            alpha,
-            PresentMode::Fifo,
-            FullscreenExclusive::Default,
-            true,
-            ColorSpace::SrgbNonLinear,
-        )
-        .unwrap()
+        Swapchain::start(device.clone(), surface.clone())
+            .format(format)
+            .composite_alpha(alpha)
+            .dimensions(dimensions)
+            .num_images(caps.min_image_count)
+            .usage(ImageUsage::color_attachment())
+            .sharing_mode(&queue)
+            .clipped(true)
+            .build()
+            .unwrap()
     };
     let repaint_signal = std::sync::Arc::new(VulkanoRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),

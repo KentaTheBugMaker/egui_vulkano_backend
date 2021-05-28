@@ -61,7 +61,7 @@ struct PushConstants {
     marker: IsEguiTextureMarker,
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
-/// same as [egui_wgpu_backend::ScreenDescriptor](https://docs.rs/egui_wgpu_backend/0.5.0/egui_wgpu_backend/struct.ScreenDescriptor.html)
+/// same as [egui_wgpu_backend::ScreenDescriptor](https://docs.rs/egui_wgpu_backend/0.8.0/egui_wgpu_backend/struct.ScreenDescriptor.html)
 pub struct ScreenDescriptor {
     /// Width of the window in physical pixel.
     pub physical_width: u32,
@@ -279,12 +279,12 @@ impl EguiVulkanoRenderPass {
         let scissors = skip_by_clip(screen_descriptor, clip_rectangles);
         let mut indices_from = 0;
         let mut vertices_from = 0;
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "backend_debug")]
         println!("start frame");
         for ((_i, egui::ClippedMesh(_, mesh)), scissor) in
             paint_jobs.iter().enumerate().zip(scissors.clone())
         {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "backend_debug")]
             println!(
                 "mesh {} vertices {} indices {}",
                 _i,
@@ -293,7 +293,7 @@ impl EguiVulkanoRenderPass {
             );
             if mesh.vertices.is_empty() || mesh.indices.is_empty() | scissor.is_none() {
                 all_mesh_range.push(None);
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "backend_debug")]
                 println!("Detect glitch mesh");
                 continue;
             }
@@ -322,7 +322,7 @@ impl EguiVulkanoRenderPass {
             .vertex_buffer_pool
             .chunk(exact_sized_iter_vec_vertices.copied())
             .unwrap();
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "backend_debug")]
         println!("end frame");
         for ((egui::ClippedMesh(_, mesh), range), scissor) in
             paint_jobs.iter().zip(all_mesh_range.iter()).zip(scissors)
@@ -420,7 +420,7 @@ impl EguiVulkanoRenderPass {
     }
     fn free_user_texture(&mut self, id: TextureId) {
         if let TextureId::User(id) = id {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "backend_debug")]
             println!("free {}", id);
             self.user_textures
                 .get_mut(id as usize)
@@ -439,7 +439,7 @@ impl EguiVulkanoRenderPass {
         // check request is not empty
         if !self.image_transfer_request_list.is_empty() {
             for done in self.done_notifier.iter() {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "backend_debug")]
                 println!("image upload finished : {:?}", done);
                 for (index, request) in self.image_transfer_request_list.iter().enumerate() {
                     if *request == done {
@@ -486,7 +486,7 @@ impl EguiVulkanoRenderPass {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "backend_debug")]
         println!("new texture arrived {:?}", id);
         if let TextureId::User(id) = id {
             // test Texture slot allocated

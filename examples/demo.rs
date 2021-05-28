@@ -76,10 +76,12 @@ fn main() {
     let mut swapchain = {
         let caps = surface.capabilities(physical).unwrap();
         let format = caps.supported_formats.iter().next().unwrap().0;
+        let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let dimensions: [u32; 2] = surface.window().inner_size().into();
         Swapchain::start(device.clone(), surface.clone())
             .format(format)
             .dimensions(dimensions)
+            .composite_alpha(alpha)
             .num_images(caps.min_image_count)
             .usage(ImageUsage::color_attachment())
             .sharing_mode(&queue)
