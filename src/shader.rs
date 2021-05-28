@@ -1,4 +1,4 @@
-use crate::render_pass::{render_pass_desc_from_format, EguiRenderPassDesc};
+use crate::render_pass::render_pass_desc_from_format;
 use crate::Pipeline;
 use std::ffi::CString;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterfaceDef, ShaderInterfaceDefEntry, ShaderModule,
 };
-use vulkano::render_pass::{RenderPass, RenderPassDesc, Subpass};
+use vulkano::render_pass::{RenderPass, Subpass};
 
 struct VsInterfaceIn;
 struct VsInterfaceOut;

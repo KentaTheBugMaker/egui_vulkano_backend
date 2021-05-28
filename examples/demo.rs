@@ -5,14 +5,11 @@ use egui::FontDefinitions;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::format::Format;
+
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::swapchain;
-use vulkano::swapchain::{
-    AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
-    SwapchainCreationError,
-};
+use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};

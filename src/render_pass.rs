@@ -1,9 +1,7 @@
 use vulkano::image::ImageLayout;
-use vulkano::render_pass::{
-    AttachmentDesc, LoadOp, RenderPassDesc, StoreOp, SubpassDependencyDesc, SubpassDesc,
-};
+use vulkano::render_pass::{AttachmentDesc, LoadOp, RenderPassDesc, StoreOp, SubpassDesc};
 
-use vulkano::format::{ClearValue, Format};
+use vulkano::format::Format;
 
 #[derive(Copy, Clone)]
 pub struct EguiRenderPassDesc {
