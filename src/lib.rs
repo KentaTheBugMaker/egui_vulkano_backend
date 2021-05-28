@@ -17,14 +17,13 @@ use iter_vec::ExactSizedIterVec;
 use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::command_buffer::{
-    AutoCommandBuffer, CommandBufferExecFuture, DynamicState, SubpassContents,
+    CommandBufferExecFuture, CommandBufferUsage, DynamicState, PrimaryAutoCommandBuffer,
+    SubpassContents,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
 use vulkano::device::{Device, Queue};
 
-use vulkano::framebuffer::Framebuffer;
-use vulkano::framebuffer::{FramebufferAbstract, RenderPass};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 use vulkano::image::{
     AttachmentImage, ImageCreationError, ImageDimensions, ImageUsage, ImmutableImage, MipmapsCount,
@@ -33,12 +32,14 @@ use vulkano::image::{
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::GraphicsPipeline;
+use vulkano::render_pass::{Framebuffer, FramebufferAbstract, RenderPass};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::{GpuFuture, NowFuture};
 
 use crate::render_pass::EguiRenderPassDesc;
 use crate::shader::create_pipeline;
+use std::fmt::Debug;
 
 mod render_pass;
 #[cfg(feature = "winit_runner")]
@@ -80,7 +81,6 @@ impl ScreenDescriptor {
 type Pipeline = GraphicsPipeline<
     SingleBufferDefinition<EguiVulkanoVertex>,
     Box<dyn PipelineLayoutAbstract + Send + Sync>,
-    Arc<RenderPass<EguiRenderPassDesc>>,
 >;
 /// egui rendering command builder
 pub struct EguiVulkanoRenderPass {
@@ -102,7 +102,7 @@ pub struct EguiVulkanoRenderPass {
 }
 type Work = (
     TextureId,
-    CommandBufferExecFuture<NowFuture, AutoCommandBuffer>,
+    CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>,
 );
 fn spawn_image_upload_thread() -> (Sender<Work>, Receiver<TextureId>) {
     let (tx, rx): (Sender<Work>, Receiver<Work>) = std::sync::mpsc::channel();
@@ -203,7 +203,7 @@ impl EguiVulkanoRenderPass {
             .map(|image| {
                 let view = ImageView::new(image.clone()).unwrap();
                 Arc::new(
-                    Framebuffer::start(self.pipeline.clone())
+                    Framebuffer::start(self.pipeline.clone().render_pass().clone())
                         .add(view)
                         .unwrap()
                         .build()
@@ -215,7 +215,7 @@ impl EguiVulkanoRenderPass {
     /// execute command and present to screen
     pub fn present_to_screen<Wnd>(
         &self,
-        command: AutoCommandBuffer<StandardCommandPoolAlloc>,
+        command: PrimaryAutoCommandBuffer<StandardCommandPoolAlloc>,
         acquire_future: SwapchainAcquireFuture<Wnd>,
     ) {
         let swap_chain = acquire_future.swapchain().clone();
@@ -237,12 +237,12 @@ impl EguiVulkanoRenderPass {
         render_target: RenderTarget,
         paint_jobs: &[ClippedMesh],
         screen_descriptor: &ScreenDescriptor,
-    ) -> AutoCommandBuffer<StandardCommandPoolAlloc> {
+    ) -> PrimaryAutoCommandBuffer<StandardCommandPoolAlloc> {
         let mut exact_sized_iter_vec_vertices = ExactSizedIterVec::new();
         let mut exact_sized_iter_vec_indices = ExactSizedIterVec::new();
         let framebuffer = match render_target {
             RenderTarget::ColorAttachment(color_attachment) => Arc::new(
-                vulkano::framebuffer::Framebuffer::start(self.pipeline.render_pass().clone())
+                vulkano::render_pass::Framebuffer::start(self.pipeline.render_pass().clone())
                     .add(color_attachment)
                     .unwrap()
                     .build()
@@ -253,9 +253,10 @@ impl EguiVulkanoRenderPass {
 
         let logical = screen_descriptor.logical_size();
 
-        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary_one_time_submit(
+        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary(
             self.device.clone(),
             self.queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
         )
         .expect("failed to create command buffer builder");
         pass.begin_render_pass(

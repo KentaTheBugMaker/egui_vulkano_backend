@@ -78,32 +78,18 @@ fn main() {
 
     let mut swapchain = {
         let caps = surface.capabilities(physical).unwrap();
-        let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        //     let alpha = CompositeAlpha::PreMultiplied;
-        assert!(&caps
-            .supported_formats
-            .contains(&(Format::B8G8R8A8Srgb, ColorSpace::SrgbNonLinear)));
-        let format = Format::B8G8R8A8Srgb;
+        let format = caps.supported_formats.iter().next().unwrap().0;
         let dimensions: [u32; 2] = surface.window().inner_size().into();
-
-        Swapchain::new(
-            device.clone(),
-            surface.clone(),
-            caps.min_image_count,
-            format,
-            dimensions,
-            1,
-            ImageUsage::color_attachment(),
-            &queue,
-            SurfaceTransform::Identity,
-            alpha,
-            PresentMode::Fifo,
-            FullscreenExclusive::Default,
-            true,
-            ColorSpace::SrgbNonLinear,
-        )
-        .unwrap()
-        .0
+        Swapchain::start(device.clone(), surface.clone())
+            .format(format)
+            .dimensions(dimensions)
+            .num_images(caps.min_image_count)
+            .usage(ImageUsage::color_attachment())
+            .sharing_mode(&queue)
+            .clipped(true)
+            .build()
+            .unwrap()
+            .0
     };
 
     //create renderer
@@ -183,7 +169,7 @@ fn main() {
                 if recreate_swapchain {
                     let dimensions: [u32; 2] = surface.window().inner_size().into();
                     let (new_swapchain, new_images) =
-                        match swapchain.recreate_with_dimensions(dimensions) {
+                        match swapchain.recreate().dimensions(dimensions).build() {
                             Ok(r) => r,
                             Err(SwapchainCreationError::UnsupportedDimensions) => return,
                             Err(e) => panic!("Failed to recreate swapchain: {:?}", e),

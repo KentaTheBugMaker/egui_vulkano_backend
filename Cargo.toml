@@ -1,6 +1,6 @@
 [package]
 name = "egui_vulkano_backend"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
 license="MIT OR Apache-2.0"
@@ -8,26 +8,27 @@ description = "Backend code to use egui with vulkano."
 homepage = "https://github.com/t18b219k/egui_vulkano_backend"
 repository = "https://github.com/t18b219k/egui_vulkano_backend"
 readme = "README.md"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 winit_runner=["vulkano-win","egui_winit_platform","winit","chrono"]
 runner_http=["epi_http","epi/http"]
 [dependencies]
-vulkano = "^0.22.0"
-epi = "0.10.0"
+vulkano = "^0.23.0"
+epi = "0.12.0"
 iter_vec ="0.1"
-vulkano-win = {version="0.22.0",optional=true}
-winit = {version="0.24.0",optional=true}
-egui_winit_platform = {version="0.5.0",optional=true}
-epi_http={version="0.10.0",optional=true}
+vulkano-win = {version="0.23.0",optional=true}
+winit = {version="0.25.0",optional=true}
+egui_winit_platform = {version="0.7.0",optional=true}
+epi_http={version="0.12.0",optional=true}
 chrono = {version="0.4.19",optional=true}
 [dev-dependencies]
-egui_winit_platform = "0.5.0"
-epi_http={version="0.10.0"}
-egui="0.10.0"
-epi={version="0.10.0",features=["http"]}
+egui_winit_platform = "0.7.0"
+epi_http={version="0.12.0"}
+egui="0.12.0"
+epi={version="0.12.0",features=["http"]}
 winit="0.24.0"
-egui_demo_lib = {version="0.10.0",features=["http","syntect"]}
-vulkano-win = "^0.22.0"
+egui_demo_lib = {version="0.12.0",features=["http","syntect"]}
+vulkano-win = "^0.23.0"
 ffmpeg ={version="0.3"}
 chrono ="0.4.19"

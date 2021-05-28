@@ -1,4 +1,4 @@
-use crate::render_pass::EguiRenderPassDesc;
+use crate::render_pass::{render_pass_desc_from_format, EguiRenderPassDesc};
 use crate::Pipeline;
 use std::ffi::CString;
 use std::sync::Arc;
@@ -9,12 +9,12 @@ use vulkano::descriptor::descriptor::{
 use vulkano::descriptor::pipeline_layout::{PipelineLayoutDesc, PipelineLayoutDescPcRange};
 use vulkano::device::Device;
 use vulkano::format::Format;
-use vulkano::framebuffer::{RenderPassDesc, Subpass};
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterfaceDef, ShaderInterfaceDefEntry, ShaderModule,
 };
+use vulkano::render_pass::{RenderPass, RenderPassDesc, Subpass};
 
 struct VsInterfaceIn;
 struct VsInterfaceOut;
@@ -217,10 +217,10 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         )
     };
     let render_pass = Arc::new(
-        EguiRenderPassDesc {
-            color: (render_target_format, 0),
-        }
-        .build_render_pass(device.clone())
+        RenderPass::new(
+            device.clone(),
+            render_pass_desc_from_format(render_target_format),
+        )
         .unwrap(),
     );
 

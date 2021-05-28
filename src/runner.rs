@@ -198,7 +198,7 @@ pub fn run(mut app: Box<dyn epi::App>) {
             } => {
                 let dimensions: [u32; 2] = surface.window().inner_size().into();
                 let (new_swapchain, new_images) =
-                    match swapchain.recreate_with_dimensions(dimensions) {
+                    match swapchain.recreate().dimensions(dimensions).build() {
                         Ok(r) => r,
                         Err(SwapchainCreationError::UnsupportedDimensions) => return,
                         Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
