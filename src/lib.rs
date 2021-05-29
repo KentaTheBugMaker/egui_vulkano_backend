@@ -610,15 +610,10 @@ impl EguiVulkanoRenderPass {
     pub fn init_vulkano_image_with_parameters(
         &mut self,
         dimensions: [u32; 2],
-        usage:ImageUsage,
-        format:vulkano::format::Format,
+        usage: ImageUsage,
+        format: vulkano::format::Format,
     ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
-        match AttachmentImage::with_usage(
-            self.device.clone(),
-            dimensions,
-            format,
-            usage,
-        ) {
+        match AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage) {
             Ok(image) => {
                 let texture_id = self.alloc_user_texture();
                 if let TextureId::User(id) = texture_id {

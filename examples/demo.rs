@@ -75,7 +75,7 @@ fn main() {
 
     let mut swapchain = {
         let caps = surface.capabilities(physical).unwrap();
-        let format = caps.supported_formats.iter().next().unwrap().0;
+        let format = caps.supported_formats.get(0).unwrap().0;
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let dimensions: [u32; 2] = surface.window().inner_size().into();
         Swapchain::start(device.clone(), surface.clone())

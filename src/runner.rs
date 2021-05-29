@@ -68,7 +68,7 @@ pub fn run(mut app: Box<dyn epi::App>) {
     let (mut swapchain, images) = {
         let caps = surface.capabilities(physical_device).unwrap();
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        let format = caps.supported_formats.iter().next().unwrap().0;
+        let format = caps.supported_formats.get(0).unwrap().0;
         let dimensions: [u32; 2] = surface.window().inner_size().into();
 
         Swapchain::start(device.clone(), surface.clone())
