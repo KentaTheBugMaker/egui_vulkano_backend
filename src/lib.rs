@@ -41,8 +41,7 @@ use crate::shader::create_pipeline;
 use std::fmt::Debug;
 
 mod render_pass;
-#[cfg(feature = "winit_runner")]
-pub mod runner;
+
 mod shader;
 
 #[derive(Default, Debug, Copy, Clone)]
