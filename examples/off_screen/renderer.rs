@@ -30,6 +30,7 @@ use vulkano::render_pass::{
     AttachmentDesc, Framebuffer, FramebufferAbstract, LoadOp, RenderPass, RenderPassDesc, StoreOp,
     Subpass, SubpassDesc,
 };
+use vulkano::sync::GpuFuture;
 
 // shader interface definition
 struct VSInput;
@@ -211,7 +212,7 @@ fn create_pipeline(
             .fragment_shader(fs_entry, ())
             .depth_stencil_simple_depth()
             .render_pass(Subpass::from(render_pass, 0).unwrap())
-            .build(device.clone())
+            .build(device)
             .unwrap(),
     )
 }
@@ -359,7 +360,7 @@ impl TeapotRenderer {
                     &dynamic_state,
                     vec![self.vertex_buffer.clone(), self.normal_buffer.clone()],
                     self.index_buffer.clone(),
-                    set.clone(),
+                    set,
                     (),
                     vec![],
                 )
@@ -367,12 +368,15 @@ impl TeapotRenderer {
                 .end_render_pass()
                 .unwrap();
             let command_buffer: PrimaryAutoCommandBuffer = command_buffer_builder.build().unwrap();
-            command_buffer.execute(self.queue.clone());
+            command_buffer
+                .execute(self.queue.clone())
+                .unwrap()
+                .cleanup_finished();
         } else {
             panic!("Frame buffer is blank");
         }
     }
-    pub fn set_rotate(&mut self,rot:f32){
-        self.rotate=rot;
+    pub fn set_rotate(&mut self, rot: f32) {
+        self.rotate = rot;
     }
 }

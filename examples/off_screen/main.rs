@@ -18,9 +18,9 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
+use crate::renderer::TeapotRenderer;
 use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
 use std::borrow::Borrow;
-use crate::renderer::TeapotRenderer;
 
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
@@ -77,8 +77,11 @@ fn main() {
     };
 
     //create renderer
-    let mut egui_render_pass =
-        egui_vulkano_backend::EguiVulkanoRenderPass::new(device.clone(), queue.clone(), swapchain.format());
+    let mut egui_render_pass = egui_vulkano_backend::EguiVulkanoRenderPass::new(
+        device.clone(),
+        queue.clone(),
+        swapchain.format(),
+    );
     egui_render_pass.create_frame_buffers(images.as_slice());
     //init egui
 
@@ -95,14 +98,14 @@ fn main() {
         style: Default::default(),
     });
     let start_time = Instant::now();
-    let mut teapot_renderer =TeapotRenderer::new(device.clone(), queue.clone());
+    let mut teapot_renderer = TeapotRenderer::new(device.clone(), queue);
     teapot_renderer.set_render_target(render_target.clone());
     let mut screen_descriptor = ScreenDescriptor {
         physical_width: size.width,
         physical_height: size.height,
         scale_factor: surface.window().scale_factor() as f32,
     };
-    let mut rotate=0.0;
+    let mut rotate = 0.0;
     let mut height_percent = 0.7;
     let mut image_size = [size.width as f32, size.height as f32 * height_percent];
     event_loop.run(move |event, _, control_flow| {
@@ -167,9 +170,15 @@ fn main() {
                                 image_size =
                                     [size.width as f32, size.height as f32 * height_percent];
                             }
-                          if  ui.add(egui::Slider::new(&mut rotate,-std::f32::consts::PI..=std::f32::consts::PI)).changed(){
-                              teapot_renderer.set_rotate(rotate)
-                          }
+                            if ui
+                                .add(egui::Slider::new(
+                                    &mut rotate,
+                                    -std::f32::consts::PI..=std::f32::consts::PI,
+                                ))
+                                .changed()
+                            {
+                                teapot_renderer.set_rotate(rotate)
+                            }
                         });
                     })
                 });
