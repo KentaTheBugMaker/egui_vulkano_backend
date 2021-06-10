@@ -84,7 +84,7 @@ fn main() {
     );
     egui_render_pass.create_frame_buffers(images.as_slice());
     //init egui
-
+    // create relation between TextureID and render target
     let (texture_id, mut render_target) = egui_render_pass
         .init_vulkano_image_with_dimensions([1280, 720])
         .unwrap();
@@ -98,7 +98,9 @@ fn main() {
         style: Default::default(),
     });
     let start_time = Instant::now();
+    //create renderer
     let mut teapot_renderer = TeapotRenderer::new(device.clone(), queue);
+    //set render target
     teapot_renderer.set_render_target(render_target.clone());
     let mut screen_descriptor = ScreenDescriptor {
         physical_width: size.width,
@@ -138,6 +140,7 @@ fn main() {
                     )
                     .unwrap();
                 image_size = [size.width as f32, size.height as f32 * height_percent];
+                //reset framebuffer
                 teapot_renderer.set_render_target(render_target.clone());
                 //set screen descriptor
                 screen_descriptor.physical_height = size.height;
@@ -154,6 +157,7 @@ fn main() {
                     ui.vertical(|ui| {
                         ui.image(texture_id, image_size);
                         ui.horizontal(|ui| {
+                            //add Model view adjuster
                             if ui
                                 .add(egui::widgets::Slider::new(&mut height_percent, 0.1..=0.9))
                                 .changed()
@@ -170,6 +174,7 @@ fn main() {
                                 image_size =
                                     [size.width as f32, size.height as f32 * height_percent];
                             }
+                            //add rotation control
                             if ui
                                 .add(egui::Slider::new(
                                     &mut rotate,

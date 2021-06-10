@@ -8,6 +8,16 @@
 Backend code to run [egui](https://crates.io/crates/egui) using [vulkano](https://crates.io/crates/vulkano).
 
 this crate rendering only you need I/O egui integration e.g. [egui_winit_platform](https://crates.io/crates/egui_winit_platform)
+## sample
+[bit complex example](https://github.com/t18b219k/egui_vulkano_backend/tree/master/examples/off_screen/main.rs)
+```shell
+cargo run --example off_screen
+```
+We have created [a simple example](https://github.com/t18b219k/egui_vulkano_backend/tree/master/examples/demo.rs) project to show you, how to use this crate.
+```shell
+cargo run --example demo
+```
+
 ## known bug 
 None
 ## Update v0.4.1
@@ -41,11 +51,7 @@ None
 ## Fixed
  * doesn't pass color test
  * change tab in sample at debug build cause crash.
-## Example
-We have created [a simple example](https://github.com/t18b219k/egui_vulkano_backend/tree/master/examples/demo.rs) project to show you, how to use this crate.
-```shell
-cargo run --example demo
-```
+
 ## Version list
 
 |egui_vulkano_backend|egui |vulkano |vulkano-shader(dependency) |vulkano-win(if use runner)|
