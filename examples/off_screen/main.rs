@@ -1,3 +1,6 @@
+mod model;
+mod renderer;
+
 use std::time::Instant;
 
 use egui::FontDefinitions;
@@ -91,7 +94,7 @@ fn main() {
         style: Default::default(),
     });
     let start_time = Instant::now();
-    //  let mut previous_frame_time = None;
+
     let mut screen_descriptor = ScreenDescriptor {
         physical_width: size.width,
         physical_height: size.height,
@@ -166,7 +169,6 @@ fn main() {
                 let (_output, paint_commands) = platform.end_frame();
                 let paint_jobs = platform.context().tessellate(paint_commands);
 
-                //   let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
                 let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
                 previous_frame_end.as_mut().unwrap().cleanup_finished();
 
