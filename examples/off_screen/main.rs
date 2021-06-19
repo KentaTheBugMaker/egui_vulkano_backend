@@ -61,17 +61,18 @@ fn main() {
 
     let (mut swapchain, images) = {
         let caps = surface.capabilities(physical).unwrap();
-        let format = caps.supported_formats.get(0).unwrap().0;
+        assert!(caps.supported_formats.contains(&(vulkano::format::Format::R8G8B8A8Srgb,vulkano::swapchain::ColorSpace::SrgbNonLinear)));
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let dimensions: [u32; 2] = surface.window().inner_size().into();
         Swapchain::start(device.clone(), surface.clone())
-            .format(format)
+            .format(vulkano::format::Format::R8G8B8A8Srgb)
             .dimensions(dimensions)
             .composite_alpha(alpha)
             .num_images(caps.min_image_count)
             .usage(ImageUsage::color_attachment())
             .sharing_mode(&queue)
             .clipped(true)
+            .color_space(vulkano::swapchain::ColorSpace::SrgbNonLinear)
             .build()
             .unwrap()
     };

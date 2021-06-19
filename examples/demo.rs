@@ -75,17 +75,18 @@ fn main() {
 
     let mut swapchain = {
         let caps = surface.capabilities(physical).unwrap();
-        let format = caps.supported_formats.get(0).unwrap().0;
+        assert!(caps.supported_formats.contains(&(vulkano::format::Format::R8G8B8A8Srgb,vulkano::swapchain::ColorSpace::SrgbNonLinear)));
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let dimensions: [u32; 2] = surface.window().inner_size().into();
         Swapchain::start(device.clone(), surface.clone())
-            .format(format)
+            .format(vulkano::format::Format::R8G8B8A8Srgb)
             .dimensions(dimensions)
             .composite_alpha(alpha)
             .num_images(caps.min_image_count)
             .usage(ImageUsage::color_attachment())
             .sharing_mode(&queue)
             .clipped(true)
+            .color_space(vulkano::swapchain::ColorSpace::SrgbNonLinear)
             .build()
             .unwrap()
             .0
@@ -199,17 +200,15 @@ fn main() {
                     scale_factor: surface.window().scale_factor() as f32,
                 };
                 egui_render_pass.request_upload_egui_texture(&platform.context().texture());
-                //      egui_render_pass.upload_pending_textures();
-                let command_build_start = Instant::now();
+
                 let render_target = RenderTarget::FrameBufferIndex(image_num);
                 let render_command = egui_render_pass.create_command_buffer(
                     render_target,
                     &paint_jobs,
                     &screen_descriptor,
                 );
-                let command_build_end = Instant::now();
-                let command_build_time = command_build_end - command_build_start;
-                println!("Command build time {}", command_build_time.as_secs_f32());
+
+
                 egui_render_pass.present_to_screen(render_command, acquire_future);
                 *control_flow = ControlFlow::Poll
             }
