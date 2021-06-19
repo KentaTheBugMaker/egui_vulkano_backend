@@ -61,7 +61,10 @@ fn main() {
 
     let (mut swapchain, images) = {
         let caps = surface.capabilities(physical).unwrap();
-        assert!(caps.supported_formats.contains(&(vulkano::format::Format::R8G8B8A8Srgb,vulkano::swapchain::ColorSpace::SrgbNonLinear)));
+        assert!(caps.supported_formats.contains(&(
+            vulkano::format::Format::R8G8B8A8Srgb,
+            vulkano::swapchain::ColorSpace::SrgbNonLinear
+        )));
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let dimensions: [u32; 2] = surface.window().inner_size().into();
         Swapchain::start(device.clone(), surface.clone())
