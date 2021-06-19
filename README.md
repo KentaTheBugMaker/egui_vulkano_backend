@@ -2,6 +2,8 @@
 
 [![Latest version](https://img.shields.io/crates/v/egui_vulkano_backend.svg)](https://crates.io/crates/egui_vulkano_backend)
 [![Documentation](https://docs.rs/egui_vulkano_backend/badge.svg)](https://docs.rs/egui_vulkano_backend)
+[![Build Status](https://github.com/t18b219k/egui_vulkano_backend/workflows/CI/badge.svg)](https://github.com/t18b219k/egui_vulkano_backend/actions?workflow=CI)
+[![dependency status](https://deps.rs/repo/github/t18b219k/egui_vulkano_backend/status.svg)](https://deps.rs/repo/github/t18b219k/egui_vulkano_backend)
 ![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Apache](https://img.shields.io/badge/license-Apache-blue.svg)
 
@@ -20,7 +22,7 @@ cargo run --example demo
 
 ## known bug 
 None
-## Update v0.4.1
+## Update v0.4.1(0f00641)
  * removed egui runner
 ## Update v0.4.0
  * target egui 0.12.0 + vulkano 0.23 
