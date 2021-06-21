@@ -24,7 +24,7 @@ cargo run --example demo
 None
 ## Update v0.5.0
  * target egui 0.12.0 + vulkano 0.24.0
-
+ * no change in this crate API, but you need to work for vulkano change
 ## Update v0.4.1(0f00641)
  * removed egui runner
 ## Update v0.4.0
@@ -73,6 +73,7 @@ None
 |0.3.0|0.10.0|0.22.0|none|0.22.0|
 |0.4.0|0.12.0|0.23.0|none|0.23.0|
 |0.4.1|0.12.0|0.23.0|none|removed|
+|0.5.0|0.12.0|0.24.0|none|removed|
 ## License
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
 See [LICENSE-APACHE](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-APACHE), [LICENSE-MIT](https://github.com/t18b219k/egui_vulkano_backend/blob/master/LICENSE-MIT).

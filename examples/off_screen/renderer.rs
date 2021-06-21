@@ -19,7 +19,7 @@ use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
-use vulkano::pipeline::layout::{PipelineLayout, PipelineLayoutDesc};
+use vulkano::pipeline::layout::PipelineLayoutDesc;
 use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
 };
@@ -206,7 +206,7 @@ impl TeapotRenderer {
         )
         .unwrap();
         Self {
-            device: device,
+            device,
             queue,
             vertex_buffer,
             index_buffer,
