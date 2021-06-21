@@ -2,217 +2,143 @@ use crate::render_pass::render_pass_desc_from_format;
 use crate::Pipeline;
 use std::ffi::CString;
 use std::sync::Arc;
+
 use vulkano::descriptor::descriptor::{
     DescriptorDesc, DescriptorDescTy, DescriptorImageDesc, DescriptorImageDescArray,
     DescriptorImageDescDimensions, ShaderStages,
 };
-use vulkano::descriptor::pipeline_layout::{PipelineLayoutDesc, PipelineLayoutDescPcRange};
 use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
+use vulkano::pipeline::layout::{PipelineLayoutDesc, PipelineLayoutDescPcRange};
 use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterfaceDef, ShaderInterfaceDefEntry, ShaderModule,
+    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
 };
 use vulkano::render_pass::{RenderPass, Subpass};
 
-struct VsInterfaceIn;
-struct VsInterfaceOut;
-struct FsInterfaceIn;
-struct FsInterfaceOut;
-unsafe impl ShaderInterfaceDef for VsInterfaceIn {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
-
-    fn elements(&self) -> Self::Iter {
-        Box::new(
-            [
-                ShaderInterfaceDefEntry {
-                    location: 0..1,
-                    format: Format::R32G32Sfloat,
-                    name: Some(std::borrow::Cow::Borrowed("a_pos")),
-                },
-                ShaderInterfaceDefEntry {
-                    location: 1..2,
-                    format: Format::R32G32Sfloat,
-                    name: Some(std::borrow::Cow::Borrowed("a_tex_coord")),
-                },
-                ShaderInterfaceDefEntry {
-                    location: 2..3,
-                    format: Format::R32Uint,
-                    name: Some(std::borrow::Cow::Borrowed("a_color")),
-                },
-            ]
-            .iter()
-            .cloned(),
-        )
-    }
-}
-unsafe impl ShaderInterfaceDef for VsInterfaceOut {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
-
-    fn elements(&self) -> Self::Iter {
-        Box::new(
-            [
-                ShaderInterfaceDefEntry {
-                    location: 0..1,
-                    format: Format::R32G32Sfloat,
-                    name: Some(std::borrow::Cow::Borrowed("v_tex_coord")),
-                },
-                ShaderInterfaceDefEntry {
-                    location: 1..2,
-                    format: Format::R32G32B32A32Sfloat,
-                    name: Some(std::borrow::Cow::Borrowed("v_color")),
-                },
-            ]
-            .iter()
-            .cloned(),
-        )
-    }
-}
-unsafe impl ShaderInterfaceDef for FsInterfaceIn {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
-
-    fn elements(&self) -> Self::Iter {
-        Box::new(
-            [
-                ShaderInterfaceDefEntry {
-                    location: 0..1,
-                    format: Format::R32G32Sfloat,
-                    name: Some(std::borrow::Cow::Borrowed("v_tex_coord")),
-                },
-                ShaderInterfaceDefEntry {
-                    location: 1..2,
-                    format: Format::R32G32B32A32Sfloat,
-                    name: Some(std::borrow::Cow::Borrowed("v_color")),
-                },
-            ]
-            .iter()
-            .cloned(),
-        )
-    }
-}
-unsafe impl ShaderInterfaceDef for FsInterfaceOut {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
-
-    fn elements(&self) -> Self::Iter {
-        Box::new(
-            [ShaderInterfaceDefEntry {
-                location: 0..1,
-                format: Format::R32G32B32A32Sfloat,
-                name: Some(std::borrow::Cow::Borrowed("f_color")),
-            }]
-            .iter()
-            .cloned(),
-        )
-    }
-}
-#[derive(Default, Debug, Copy, Clone)]
-struct PipelineLayout;
-unsafe impl PipelineLayoutDesc for PipelineLayout {
-    fn num_sets(&self) -> usize {
-        2
-    }
-
-    fn num_bindings_in_set(&self, set: usize) -> Option<usize> {
-        if (set == 1) | (set == 0) {
-            Some(1)
-        } else {
-            None
-        }
-    }
-
-    fn descriptor(&self, set: usize, binding: usize) -> Option<DescriptorDesc> {
-        if set == 0 {
-            if binding == 0 {
-                Some(DescriptorDesc {
-                    ty: DescriptorDescTy::Sampler,
-                    array_count: 1,
-                    stages: ShaderStages {
-                        vertex: false,
-                        tessellation_control: false,
-                        tessellation_evaluation: false,
-                        geometry: false,
-                        fragment: true,
-                        compute: false,
-                    },
-                    readonly: true,
-                })
-            } else {
-                None
-            }
-        } else if set == 1 {
-            if binding == 0 {
-                Some(DescriptorDesc {
-                    ty: DescriptorDescTy::Image(DescriptorImageDesc {
-                        sampled: true,
-                        dimensions: DescriptorImageDescDimensions::TwoDimensional,
-                        format: None,
-                        multisampled: false,
-                        array_layers: DescriptorImageDescArray::NonArrayed,
-                    }),
-                    array_count: 1,
-                    stages: ShaderStages {
-                        vertex: false,
-                        tessellation_control: false,
-                        tessellation_evaluation: false,
-                        geometry: false,
-                        fragment: true,
-                        compute: false,
-                    },
-                    readonly: true,
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn num_push_constants_ranges(&self) -> usize {
-        1
-    }
-
-    fn push_constants_range(&self, num: usize) -> Option<PipelineLayoutDescPcRange> {
-        if num == 0 {
-            Some(PipelineLayoutDescPcRange {
-                offset: 0,
-                size: 12,
-                stages: ShaderStages {
-                    vertex: true,
-                    tessellation_control: false,
-                    tessellation_evaluation: false,
-                    geometry: false,
-                    fragment: true,
-                    compute: false,
-                },
-            })
-        } else {
-            None
-        }
-    }
-}
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
     let vs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
     let fs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/frag.spv")) }.unwrap();
     let main = CString::new("main").unwrap();
+    /*
+    layout(set = 1, binding = 0) uniform texture2D t_texture;
+    layout(set = 0, binding = 0) uniform sampler s_texture;
+    layout(push_constant) uniform UniformBuffer {
+        vec2 u_screen_size;
+        bool is_egui_system_texture;
+    };
+    */
+    let pipeline_layout_desc = PipelineLayoutDesc::new(
+        vec![
+            vec![Some(DescriptorDesc {
+                ty: DescriptorDescTy::Sampler,
+                array_count: 1,
+                stages: ShaderStages {
+                    vertex: false,
+                    tessellation_control: false,
+                    tessellation_evaluation: false,
+                    geometry: false,
+                    fragment: true,
+                    compute: false,
+                },
+                readonly: true,
+            })],
+            vec![Some(DescriptorDesc {
+                ty: DescriptorDescTy::Image(DescriptorImageDesc {
+                    sampled: true,
+                    dimensions: DescriptorImageDescDimensions::TwoDimensional,
+                    format: None,
+                    multisampled: false,
+                    array_layers: DescriptorImageDescArray::NonArrayed,
+                }),
+                array_count: 1,
+                stages: ShaderStages {
+                    vertex: false,
+                    tessellation_control: false,
+                    tessellation_evaluation: false,
+                    geometry: false,
+                    fragment: true,
+                    compute: false,
+                },
+                readonly: true,
+            })],
+        ],
+        vec![PipelineLayoutDescPcRange {
+            offset: 0,
+            size: 12,
+            stages: ShaderStages {
+                vertex: true,
+                tessellation_control: false,
+                tessellation_evaluation: false,
+                geometry: false,
+                fragment: true,
+                compute: false,
+            },
+        }],
+    )
+    .unwrap();
+    let vs_in = unsafe {
+        ShaderInterface::new_unchecked(vec![
+            ShaderInterfaceEntry {
+                location: 0..1,
+                format: Format::R32G32Sfloat,
+                name: Some(std::borrow::Cow::Borrowed("a_pos")),
+            },
+            ShaderInterfaceEntry {
+                location: 1..2,
+                format: Format::R32G32Sfloat,
+                name: Some(std::borrow::Cow::Borrowed("a_tex_coord")),
+            },
+            ShaderInterfaceEntry {
+                location: 2..3,
+                format: Format::R32Uint,
+                name: Some(std::borrow::Cow::Borrowed("a_color")),
+            },
+        ])
+    };
+    let vs_out = unsafe {
+        ShaderInterface::new_unchecked(vec![
+            ShaderInterfaceEntry {
+                location: 0..1,
+                format: Format::R32G32Sfloat,
+                name: Some("v_tex_coord".into()),
+            },
+            ShaderInterfaceEntry {
+                location: 1..2,
+                format: Format::R32G32B32A32Sfloat,
+                name: Some("v_color".into()),
+            },
+        ])
+    };
+    let fs_out = unsafe {
+        ShaderInterface::new_unchecked(vec![ShaderInterfaceEntry {
+            location: 0..1,
+            format: Format::R32G32B32A32Sfloat,
+            name: Some(std::borrow::Cow::Borrowed("f_color")),
+        }])
+    };
+    let spec = &[];
     let vs_entry = unsafe {
         vs_module.graphics_entry_point(
             &main,
-            VsInterfaceIn,
-            VsInterfaceOut,
-            PipelineLayout,
+            pipeline_layout_desc.clone(),
+            spec,
+            vs_in,
+            vs_out.clone(),
             GraphicsShaderType::Vertex,
         )
     };
+
     let fs_entry = unsafe {
         fs_module.graphics_entry_point(
             &main,
-            FsInterfaceIn,
-            FsInterfaceOut,
-            PipelineLayout,
+            pipeline_layout_desc,
+            spec,
+            vs_out,
+            fs_out,
             GraphicsShaderType::Fragment,
         )
     };

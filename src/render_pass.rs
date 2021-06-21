@@ -1,4 +1,4 @@
-use vulkano::image::ImageLayout;
+use vulkano::image::{ImageLayout, SampleCount};
 use vulkano::render_pass::{AttachmentDesc, LoadOp, RenderPassDesc, StoreOp, SubpassDesc};
 
 use vulkano::format::Format;
@@ -10,7 +10,7 @@ pub struct EguiRenderPassDesc {
 pub(crate) fn render_pass_desc_from_format(format: Format) -> RenderPassDesc {
     let attachment_desc = AttachmentDesc {
         format,
-        samples: 1,
+        samples: SampleCount::Sample1,
         load: LoadOp::Clear,
         store: StoreOp::Store,
         stencil_load: LoadOp::Clear,

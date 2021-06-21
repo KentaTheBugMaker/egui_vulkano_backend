@@ -21,7 +21,7 @@ use vulkano::command_buffer::{
     SubpassContents,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::descriptor::{DescriptorSet, PipelineLayoutAbstract};
+use vulkano::descriptor::DescriptorSet;
 use vulkano::device::{Device, Queue};
 
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
@@ -31,7 +31,7 @@ use vulkano::image::{
 };
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
@@ -76,10 +76,7 @@ impl ScreenDescriptor {
         (logical_width as u32, logical_height as u32)
     }
 }
-type Pipeline = GraphicsPipeline<
-    SingleBufferDefinition<EguiVulkanoVertex>,
-    Box<dyn PipelineLayoutAbstract + Send + Sync>,
->;
+type Pipeline = GraphicsPipeline<SingleBufferDefinition<EguiVulkanoVertex>>;
 /// egui rendering command builder
 pub struct EguiVulkanoRenderPass {
     pipeline: Arc<Pipeline>,

@@ -1,6 +1,6 @@
 [package]
 name = "egui_vulkano_backend"
-version = "0.4.1"
+version = "0.5.0"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
 license="MIT OR Apache-2.0"
@@ -13,16 +13,16 @@ readme = "README.md"
 [features]
 backend_debug=[]
 [dependencies]
-vulkano = "^0.23.0"
+vulkano = "^0.24.0"
 epi = "0.12.0"
 iter_vec ="0.1"
 [dev-dependencies]
-egui_winit_platform = "0.7.0"
+egui_winit_platform = "0.8.0"
 epi_http={version="0.12.0"}
 egui="0.12.0"
 epi={version="0.12.0",features=["http"]}
-winit="0.24.0"
+winit="0.25.0"
 egui_demo_lib = {version="0.12.0",features=["http","syntect"]}
-vulkano-win = "^0.23.0"
+vulkano-win = "^0.24.0"
 cgmath = "0.18.0"
 chrono ="0.4.19"

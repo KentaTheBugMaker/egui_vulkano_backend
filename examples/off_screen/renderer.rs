@@ -14,14 +14,14 @@ use vulkano::descriptor::descriptor::{
     DescriptorBufferDesc, DescriptorDesc, DescriptorDescTy, ShaderStages,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::descriptor::pipeline_layout::{PipelineLayoutDesc, PipelineLayoutDescPcRange};
-use vulkano::descriptor::PipelineLayoutAbstract;
+
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
-use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage};
+use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
+use vulkano::pipeline::layout::{PipelineLayout, PipelineLayoutDesc};
 use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterfaceDef, ShaderInterfaceDefEntry, ShaderModule,
+    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
 };
 use vulkano::pipeline::vertex::TwoBuffersDefinition;
 use vulkano::pipeline::viewport::Viewport;
@@ -33,74 +33,35 @@ use vulkano::render_pass::{
 use vulkano::sync::GpuFuture;
 
 // shader interface definition
-struct VSInput;
-unsafe impl ShaderInterfaceDef for VSInput {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
 
-    fn elements(&self) -> Self::Iter {
-        /*
-            layout(location = 0) in vec3 position;
-            layout(location = 1) in vec3 normal;
-        */
-        Box::new(
-            [
-                ShaderInterfaceDefEntry {
-                    location: 0..1,
-                    format: Format::R32G32B32Sfloat,
-                    name: Some(Cow::Borrowed("position")),
-                },
-                ShaderInterfaceDefEntry {
-                    location: 1..2,
-                    format: Format::R32G32B32Sfloat,
-                    name: Some(Cow::Borrowed("normal")),
-                },
-            ]
-            .iter()
-            .cloned(),
-        )
-    }
-}
-//VS->FS interface
-struct VSOutput;
-unsafe impl ShaderInterfaceDef for VSOutput {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
-
-    fn elements(&self) -> Self::Iter {
-        /*layout(location = 0) out vec3 v_normal;*/
-        Box::new(
-            [ShaderInterfaceDefEntry {
-                location: 0..1,
-                format: Format::R32G32B32Sfloat,
-                name: Some(Cow::Borrowed("v_normal")),
-            }]
-            .iter()
-            .cloned(),
-        )
-    }
-}
-
-struct FSOutput;
-unsafe impl ShaderInterfaceDef for FSOutput {
-    type Iter = Box<dyn ExactSizeIterator<Item = ShaderInterfaceDefEntry>>;
-
-    fn elements(&self) -> Self::Iter {
-        /*layout(location = 0) out vec4 f_color;*/
-        Box::new(
-            [ShaderInterfaceDefEntry {
-                location: 0..1,
-                format: Format::R32G32B32A32Sfloat,
-                name: Some(Cow::Borrowed("f_color")),
-            }]
-            .iter()
-            .cloned(),
-        )
-    }
+//pipeline_layout_desc
+fn create_pipeline_layout_desc() -> PipelineLayoutDesc {
+    PipelineLayoutDesc::new(
+        vec![vec![Some(DescriptorDesc {
+            ty: DescriptorDescTy::Buffer(DescriptorBufferDesc {
+                dynamic: None,
+                storage: false,
+            }),
+            array_count: 1,
+            stages: ShaderStages {
+                vertex: true,
+                tessellation_control: false,
+                tessellation_evaluation: false,
+                geometry: false,
+                fragment: false,
+                compute: false,
+            },
+            readonly: true,
+        })]],
+        vec![],
+    )
+    .unwrap()
 }
 //render pass
 fn create_renderpass() -> RenderPassDesc {
     let color = AttachmentDesc {
         format: Format::R8G8B8A8Srgb,
-        samples: 1,
+        samples: SampleCount::Sample1,
         load: LoadOp::Clear,
         store: StoreOp::Store,
         stencil_load: LoadOp::Load,
@@ -110,7 +71,7 @@ fn create_renderpass() -> RenderPassDesc {
     };
     let depth = AttachmentDesc {
         format: Format::D32Sfloat,
-        samples: 1,
+        samples: SampleCount::Sample1,
         load: LoadOp::Clear,
         store: StoreOp::Store,
         stencil_load: LoadOp::Load,
@@ -127,78 +88,59 @@ fn create_renderpass() -> RenderPassDesc {
     };
     RenderPassDesc::new(vec![color, depth], vec![sub_pass_desc], vec![])
 }
-#[derive(Default, Debug, Copy, Clone)]
-struct PipelineLayout;
-unsafe impl PipelineLayoutDesc for PipelineLayout {
-    fn num_sets(&self) -> usize {
-        1
-    }
-
-    fn num_bindings_in_set(&self, set: usize) -> Option<usize> {
-        if set == 0 {
-            Some(1)
-        } else {
-            None
-        }
-    }
-
-    fn descriptor(&self, set: usize, binding: usize) -> Option<DescriptorDesc> {
-        if set == 0 && binding == 0 {
-            Some(DescriptorDesc {
-                ty: DescriptorDescTy::Buffer(DescriptorBufferDesc {
-                    dynamic: None,
-                    storage: false,
-                }),
-                array_count: 1,
-                stages: ShaderStages {
-                    vertex: true,
-                    tessellation_control: false,
-                    tessellation_evaluation: false,
-                    geometry: false,
-                    fragment: false,
-                    compute: false,
-                },
-                readonly: true,
-            })
-        } else {
-            None
-        }
-    }
-
-    fn num_push_constants_ranges(&self) -> usize {
-        0
-    }
-
-    fn push_constants_range(&self, _num: usize) -> Option<PipelineLayoutDescPcRange> {
-        None
-    }
-}
 fn create_pipeline(
     device: Arc<Device>,
-) -> Arc<
-    GraphicsPipeline<
-        TwoBuffersDefinition<Vertex, Normal>,
-        Box<dyn PipelineLayoutAbstract + Send + Sync>,
-    >,
-> {
+) -> Arc<GraphicsPipeline<TwoBuffersDefinition<Vertex, Normal>>> {
     let vs = unsafe { ShaderModule::new(device.clone(), include_bytes!("vert.spv")) }.unwrap();
     let fs = unsafe { ShaderModule::new(device.clone(), include_bytes!("frag.spv")) }.unwrap();
     let cstring = CString::new("main").unwrap();
+    let empty_spec_constant = &[];
+    let vs_in = unsafe {
+        ShaderInterface::new_unchecked(vec![
+            ShaderInterfaceEntry {
+                location: 0..1,
+                format: Format::R32G32B32Sfloat,
+                name: Some(Cow::Borrowed("position")),
+            },
+            ShaderInterfaceEntry {
+                location: 1..2,
+                format: Format::R32G32B32Sfloat,
+                name: Some(Cow::Borrowed("normal")),
+            },
+        ])
+    };
+    let vs_out = unsafe {
+        ShaderInterface::new_unchecked(vec![ShaderInterfaceEntry {
+            location: 0..1,
+            format: Format::R32G32B32Sfloat,
+            name: Some(Cow::Borrowed("v_normal")),
+        }])
+    };
+    let fs_out = unsafe {
+        ShaderInterface::new_unchecked(vec![ShaderInterfaceEntry {
+            location: 0..1,
+            format: Format::R32G32B32A32Sfloat,
+            name: Some(Cow::Borrowed("f_color")),
+        }])
+    };
+    let pipeline_layout_desc = create_pipeline_layout_desc();
     let vs_entry = unsafe {
         vs.graphics_entry_point(
             &cstring,
-            VSInput,
-            VSOutput,
-            PipelineLayout,
+            pipeline_layout_desc.clone(),
+            empty_spec_constant,
+            vs_in,
+            vs_out.clone(),
             GraphicsShaderType::Vertex,
         )
     };
     let fs_entry = unsafe {
         fs.graphics_entry_point(
             &cstring,
-            VSOutput,
-            FSOutput,
-            PipelineLayout,
+            pipeline_layout_desc.clone(),
+            empty_spec_constant,
+            vs_out,
+            fs_out,
             GraphicsShaderType::Fragment,
         )
     };
@@ -264,7 +206,7 @@ impl TeapotRenderer {
         )
         .unwrap();
         Self {
-            device,
+            device: device,
             queue,
             vertex_buffer,
             index_buffer,
@@ -322,7 +264,12 @@ impl TeapotRenderer {
                 };
                 self.uniform_uploading_buffer_pool.next(data).unwrap()
             };
-            let layout = self.pipeline.descriptor_set_layout(0).unwrap().clone();
+            let layout = self
+                .pipeline
+                .layout()
+                .descriptor_set_layout(0)
+                .unwrap()
+                .clone();
             let set = Arc::new(
                 PersistentDescriptorSet::start(layout)
                     .add_buffer(uniform_buffer_sub_buffer)

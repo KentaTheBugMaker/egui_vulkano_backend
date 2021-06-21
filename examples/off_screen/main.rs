@@ -10,9 +10,9 @@ use vulkano::device::{Device, DeviceExtensions};
 
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
-use vulkano::swapchain;
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
+use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -27,12 +27,22 @@ fn main() {
     // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(None, &required_extensions, None).unwrap();
+    let instance = Instance::new(
+        None,
+        Version {
+            major: 1,
+            minor: 2,
+            patch: 0,
+        },
+        &required_extensions,
+        None,
+    )
+    .unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     println!(
         "Using device: {} (type: {:?})",
-        physical.name(),
-        physical.ty()
+        physical.properties().device_name.as_ref().unwrap(),
+        physical.properties().device_type.as_ref().unwrap()
     );
 
     let event_loop: EventLoop<()> = EventLoop::with_user_event();
