@@ -8,28 +8,28 @@ extern crate vulkano;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use iter_vec::ExactSizedIterVec;
 use vulkano::buffer::{BufferSlice, BufferUsage, CpuBufferPool};
+use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::command_buffer::{
     CommandBufferExecFuture, CommandBufferUsage, DynamicState, PrimaryAutoCommandBuffer,
     SubpassContents,
 };
-use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::DescriptorSet;
 use vulkano::device::{Device, Queue};
+use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 use vulkano::image::{
     AttachmentImage, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage,
 };
-use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
-use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::pipeline::vertex::SingleBufferDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
+use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
@@ -157,7 +157,7 @@ impl EguiVulkanoRenderPass {
             0.0,
             0.0,
         )
-            .unwrap();
+        .unwrap();
 
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
@@ -168,10 +168,10 @@ impl EguiVulkanoRenderPass {
             PersistentDescriptorSet::start(
                 pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
             )
-                .add_sampler(sampler)
-                .unwrap()
-                .build()
-                .unwrap(),
+            .add_sampler(sampler)
+            .unwrap()
+            .build()
+            .unwrap(),
         ) as Arc<dyn DescriptorSet + Send + Sync>;
 
         Self {
@@ -257,13 +257,13 @@ impl EguiVulkanoRenderPass {
             self.queue.family(),
             CommandBufferUsage::OneTimeSubmit,
         )
-            .expect("[BackEnd] failed to create command buffer builder");
+        .expect("[BackEnd] failed to create command buffer builder");
         pass.begin_render_pass(
             framebuffer,
             SubpassContents::Inline,
             vec![[0.0, 0.0, 0.0, 0.0].into()],
         )
-            .unwrap();
+        .unwrap();
 
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
@@ -289,7 +289,7 @@ impl EguiVulkanoRenderPass {
         almost 70% of cpu time is spent for tessellation
         */
         for ((_i, egui::ClippedMesh(_, mesh)), scissor) in
-        paint_jobs.iter().enumerate().zip(scissors.clone())
+            paint_jobs.iter().enumerate().zip(scissors.clone())
         {
             #[cfg(feature = "backend_debug")]
             println!(
@@ -312,7 +312,7 @@ impl EguiVulkanoRenderPass {
             SAFETY: GPU send only cast
             */
             #[allow(clippy::transmute_ptr_to_ptr)]
-                exact_sized_iter_vec_vertices
+            exact_sized_iter_vec_vertices
                 .push(unsafe { std::mem::transmute(mesh.vertices.as_slice()) });
 
             let indices_len = mesh.indices.len();
@@ -332,7 +332,7 @@ impl EguiVulkanoRenderPass {
         We may need to parallel uploading.
         */
         #[cfg(feature = "backend_debug")]
-            let instant = std::time::Instant::now();
+        let instant = std::time::Instant::now();
 
         let index_buffer = self
             .index_buffer_pool
@@ -382,7 +382,7 @@ impl EguiVulkanoRenderPass {
                         pc,
                         vec![],
                     )
-                        .unwrap();
+                    .unwrap();
                 }
             }
         }
@@ -411,7 +411,7 @@ impl EguiVulkanoRenderPass {
             vulkano::format::Format::R8Unorm,
             self.queue.clone(),
         )
-            .unwrap();
+        .unwrap();
         self.request_sender
             .send((None, image.1))
             .expect("[BackEnd] failed to send system texture upload request");
@@ -480,10 +480,10 @@ impl EguiVulkanoRenderPass {
             PersistentDescriptorSet::start(
                 pipeline.layout().descriptor_set_layout(1).unwrap().clone(),
             )
-                .add_image(image_view)
-                .unwrap()
-                .build()
-                .unwrap(),
+            .add_image(image_view)
+            .unwrap()
+            .build()
+            .unwrap(),
         )
     }
     fn get_descriptor_set(&self, texture_id: TextureId) -> Arc<dyn DescriptorSet + Send + Sync> {
@@ -532,7 +532,7 @@ impl EguiVulkanoRenderPass {
                         vulkano::format::Format::R8G8B8A8Srgb,
                         queue,
                     )
-                        .unwrap();
+                    .unwrap();
                     sender
                         .send((t_id, future))
                         .expect("failed to send image copy request");
@@ -690,8 +690,8 @@ remove non visible rectangle
 */
 fn skip_by_clip(
     screen_desc: &ScreenDescriptor,
-    clip_rectangles: impl Iterator<Item=egui::Rect> + Clone,
-) -> impl Iterator<Item=Option<Scissor>> + Clone {
+    clip_rectangles: impl Iterator<Item = egui::Rect> + Clone,
+) -> impl Iterator<Item = Option<Scissor>> + Clone {
     let scale_factor = screen_desc.scale_factor;
     let physical_width = screen_desc.physical_width;
     let physical_height = screen_desc.physical_height;

@@ -1,21 +1,21 @@
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chrono::Timelike;
 use egui::{ClippedMesh, FontDefinitions};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
-use vulkano::{swapchain, Version};
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
+use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
 use winit::event_loop::ControlFlow::{Poll, Wait};
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
 use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
@@ -54,7 +54,7 @@ fn main() {
         &required_extensions,
         None,
     )
-        .unwrap();
+    .unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     let physical_properties = physical.properties();
     println!(
@@ -84,7 +84,7 @@ fn main() {
         &device_ext,
         [(queue_family, 0.5)].iter().cloned(),
     )
-        .unwrap();
+    .unwrap();
     let queue = queues.next().unwrap();
 
     let (mut swapchain, images) = {
@@ -193,7 +193,7 @@ fn main() {
                     output: &mut app_output,
                     repaint_signal: repaint_signal.clone(),
                 }
-                    .build();
+                .build();
 
                 // Draw the demo application.
                 demo_app.update(&platform.context(), &mut frame);

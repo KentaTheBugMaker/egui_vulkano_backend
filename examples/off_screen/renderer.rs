@@ -14,23 +14,23 @@ use vulkano::descriptor::descriptor::{
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
-use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
 use vulkano::image::view::ImageView;
-use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
+use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
 use vulkano::pipeline::layout::PipelineLayoutDesc;
 use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
 };
 use vulkano::pipeline::vertex::TwoBuffersDefinition;
 use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{
     AttachmentDesc, Framebuffer, FramebufferAbstract, LoadOp, RenderPass, RenderPassDesc, StoreOp,
     Subpass, SubpassDesc,
 };
 use vulkano::sync::GpuFuture;
 
-use crate::model::{Normal, Vertex};
 use crate::model;
+use crate::model::{Normal, Vertex};
 
 // shader interface definition
 
@@ -55,7 +55,7 @@ fn create_pipeline_layout_desc() -> PipelineLayoutDesc {
         })]],
         vec![],
     )
-        .unwrap()
+    .unwrap()
 }
 
 //render pass
@@ -195,21 +195,21 @@ impl TeapotRenderer {
             false,
             model::VERTICES.iter().copied(),
         )
-            .unwrap();
+        .unwrap();
         let normal_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
             BufferUsage::vertex_buffer(),
             false,
             model::NORMALS.iter().copied(),
         )
-            .unwrap();
+        .unwrap();
         let index_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
             BufferUsage::index_buffer(),
             false,
             model::INDICES.iter().copied(),
         )
-            .unwrap();
+        .unwrap();
         Self {
             device,
             queue,
@@ -232,7 +232,7 @@ impl TeapotRenderer {
             Format::D32Sfloat,
             ImageUsage::depth_stencil_attachment(),
         )
-            .unwrap();
+        .unwrap();
         //create framebuffer
         let frame_buffer = Arc::new(
             Framebuffer::start(self.render_pass.clone())
@@ -287,7 +287,7 @@ impl TeapotRenderer {
                 self.queue.family(),
                 CommandBufferUsage::OneTimeSubmit,
             )
-                .unwrap();
+            .unwrap();
             let dynamic_state = DynamicState {
                 line_width: None,
                 viewports: Some(vec![Viewport {

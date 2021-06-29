@@ -3,12 +3,12 @@ use std::time::Instant;
 
 use egui::FontDefinitions;
 use egui_winit_platform::{Platform, PlatformDescriptor};
-use vulkano::{swapchain, Version};
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
+use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -36,7 +36,7 @@ fn main() {
         &required_extensions,
         None,
     )
-        .unwrap();
+    .unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     println!(
         "Using device: {} (type: {:?})",
@@ -65,7 +65,7 @@ fn main() {
         &device_ext,
         [(queue_family, 0.5)].iter().cloned(),
     )
-        .unwrap();
+    .unwrap();
     let queue = queues.next().unwrap();
 
     let (mut swapchain, images) = {
