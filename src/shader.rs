@@ -153,7 +153,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
 
     let pipeline = Arc::new(
         vulkano::pipeline::GraphicsPipeline::start()
-            .viewports_scissors_dynamic(1)
+            .viewports_dynamic_scissors_irrelevant(1)
             .render_pass(Subpass::from(render_pass, 0).unwrap())
             .depth_stencil_disabled()
             .fragment_shader(fs_entry, ())

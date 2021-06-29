@@ -247,7 +247,7 @@ fn main() {
                     let render_target = RenderTarget::FrameBufferIndex(image_num);
                     let render_command = egui_render_pass.create_command_buffer(
                         render_target,
-                        &paint_jobs,
+                        paint_jobs,
                         &screen_descriptor,
                     );
 
