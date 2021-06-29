@@ -353,12 +353,8 @@ impl EguiVulkanoRenderPass {
                 let texture_id = buffers.texture_id;
                 let texture = self.get_descriptor_set(texture_id);
                 let marker = match texture_id {
-                    TextureId::User(_) => {
-                        IS_USER
-                    }
-                    _ => {
-                        IS_EGUI
-                    }
+                    TextureId::User(_) => IS_USER,
+                    _ => IS_EGUI,
                 };
                 let pc = PushConstants {
                     u_screen_size: [logical.0 as f32, logical.1 as f32],
