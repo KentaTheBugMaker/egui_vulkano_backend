@@ -1,12 +1,12 @@
+use vulkano::format::Format;
 use vulkano::image::{ImageLayout, SampleCount};
 use vulkano::render_pass::{AttachmentDesc, LoadOp, RenderPassDesc, StoreOp, SubpassDesc};
-
-use vulkano::format::Format;
 
 #[derive(Copy, Clone)]
 pub struct EguiRenderPassDesc {
     pub color: (Format, u32),
 }
+
 pub(crate) fn render_pass_desc_from_format(format: Format) -> RenderPassDesc {
     let attachment_desc = AttachmentDesc {
         format,

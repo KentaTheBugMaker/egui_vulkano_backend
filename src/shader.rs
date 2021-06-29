@@ -1,5 +1,3 @@
-use crate::render_pass::render_pass_desc_from_format;
-use crate::Pipeline;
 use std::ffi::CString;
 use std::sync::Arc;
 
@@ -16,6 +14,9 @@ use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
 };
 use vulkano::render_pass::{RenderPass, Subpass};
+
+use crate::Pipeline;
+use crate::render_pass::render_pass_desc_from_format;
 
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
     let vs_module =
@@ -79,7 +80,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             },
         }],
     )
-    .unwrap();
+        .unwrap();
     let vs_in = unsafe {
         ShaderInterface::new_unchecked(vec![
             ShaderInterfaceEntry {
@@ -147,7 +148,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             device.clone(),
             render_pass_desc_from_format(render_target_format),
         )
-        .unwrap(),
+            .unwrap(),
     );
 
     let pipeline = Arc::new(

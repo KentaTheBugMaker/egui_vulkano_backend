@@ -1,9 +1,6 @@
 ---
-name: Bug report
-about: Create a report to help us improve
-title: "[Bug]"
-labels: bug, wontfix
-assignees: ''
+name: Bug report about: Create a report to help us improve title: "[Bug]"
+labels: bug, wontfix assignees: ''
 
 ---
 
@@ -12,6 +9,7 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 minimal code here
+
 ```rust
 
 ```
@@ -56,11 +54,13 @@ stack backtrace:
 note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
 
 ```
+
 **Screenshots**
 If applicable, add screenshots to help explain your problem.
 
 **Enviroment:**
- - OS: [e.g. iOS]
+
+- OS: [e.g. iOS]
 - GPU:[e.g. Radeon RX 580]
 - build:[e.g. release]
 
