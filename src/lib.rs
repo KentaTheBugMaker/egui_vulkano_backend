@@ -29,7 +29,8 @@ use vulkano::descriptor::DescriptorSet;
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 use vulkano::image::{
-    AttachmentImage, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage,
+    AttachmentImage, ImageAccess, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount,
+    SwapchainImage,
 };
 use vulkano::memory::pool::StdMemoryPool;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
@@ -61,10 +62,11 @@ struct IsEguiTextureMarker(u32);
 const IS_EGUI: IsEguiTextureMarker = IsEguiTextureMarker(1);
 const IS_USER: IsEguiTextureMarker = IsEguiTextureMarker(0);
 
-#[repr(C)]
+#[repr(C, packed)]
 struct PushConstants {
     u_screen_size: [f32; 2],
     marker: IsEguiTextureMarker,
+    layer: f32,
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 /// same as [egui_wgpu_backend::ScreenDescriptor](https://docs.rs/egui_wgpu_backend/0.8.0/egui_wgpu_backend/struct.ScreenDescriptor.html)
@@ -100,6 +102,7 @@ pub struct EguiVulkanoRenderPass {
     device: Arc<Device>,
     queue: Arc<Queue>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    depth_buffer: Arc<dyn ImageViewAbstract + Send + Sync>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
@@ -186,6 +189,16 @@ impl EguiVulkanoRenderPass {
             .unwrap(),
         ) as Arc<dyn DescriptorSet + Send + Sync>;
         let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
+        let depth_buffer = ImageView::new(
+            AttachmentImage::with_usage(
+                device.clone(),
+                [1, 1],
+                vulkano::format::Format::D32Sfloat,
+                ImageUsage::transient_depth_stencil_attachment(),
+            )
+            .unwrap(),
+        )
+        .unwrap() as Arc<dyn ImageViewAbstract + Send + Sync>;
         Self {
             pipeline,
             egui_texture_version: None,
@@ -193,6 +206,7 @@ impl EguiVulkanoRenderPass {
             device,
             queue,
             frame_buffers: vec![],
+            depth_buffer,
             vertex_buffer_pool,
             index_buffer_pool,
             image_staging_buffer,
@@ -210,15 +224,18 @@ impl EguiVulkanoRenderPass {
     /// you must call when SwapChain  resize or before first create_command_buffer call
     pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
         &mut self,
-        image_views: &[Arc<SwapchainImage<Wnd>>],
+        swap_chain_images: &[Arc<SwapchainImage<Wnd>>],
     ) {
-        self.frame_buffers = image_views
+        self.resize_depth_buffer(swap_chain_images[0].dimensions().width_height());
+        self.frame_buffers = swap_chain_images
             .iter()
             .map(|image| {
                 let view = ImageView::new(image.clone()).unwrap();
                 Arc::new(
                     Framebuffer::start(self.pipeline.clone().render_pass().clone())
                         .add(view)
+                        .unwrap()
+                        .add(self.depth_buffer.clone())
                         .unwrap()
                         .build()
                         .unwrap(),
@@ -253,30 +270,38 @@ impl EguiVulkanoRenderPass {
         screen_descriptor: &ScreenDescriptor,
     ) -> PrimaryAutoCommandBuffer<StandardCommandPoolAlloc> {
         let framebuffer = match render_target {
-            RenderTarget::ColorAttachment(color_attachment) => Arc::new(
-                vulkano::render_pass::Framebuffer::start(self.pipeline.render_pass().clone())
-                    .add(color_attachment)
-                    .unwrap()
-                    .build()
-                    .expect("[BackEnd] failed to create frame buffer"),
-            ),
+            RenderTarget::ColorAttachment(color_attachment) => {
+                self.resize_depth_buffer(color_attachment.image().dimensions().width_height());
+                Arc::new(
+                    vulkano::render_pass::Framebuffer::start(self.pipeline.render_pass().clone())
+                        .add(color_attachment)
+                        .unwrap()
+                        .add(self.depth_buffer.clone())
+                        .unwrap()
+                        .build()
+                        .expect("[BackEnd] failed to create frame buffer"),
+                )
+            }
             RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
         };
 
         let logical = screen_descriptor.logical_size();
 
-        let mut pass = vulkano::command_buffer::AutoCommandBufferBuilder::primary(
-            self.device.clone(),
-            self.queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .expect("[BackEnd] failed to create command buffer builder");
-        pass.begin_render_pass(
-            framebuffer,
-            SubpassContents::Inline,
-            vec![[0.0, 0.0, 0.0, 0.0].into()],
-        )
-        .unwrap();
+        let mut command_buffer_builder =
+            vulkano::command_buffer::AutoCommandBufferBuilder::primary(
+                self.device.clone(),
+                self.queue.family(),
+                CommandBufferUsage::OneTimeSubmit,
+            )
+            .expect("[BackEnd] failed to create command buffer builder");
+
+        command_buffer_builder
+            .begin_render_pass(
+                framebuffer,
+                SubpassContents::Inline,
+                vec![[0.0, 0.0, 0.0, 0.0].into(), 1.0.into()],
+            )
+            .unwrap();
 
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
@@ -289,11 +314,7 @@ impl EguiVulkanoRenderPass {
 
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] start frame");
-        /*
-        upload index buffer and vertex buffer and remove invalid mesh
-        we can parallel processing for this work but egui tessellation is slow enough when Fractal clock with 14 depth
-        almost 70% of cpu time is spent for tessellation
-        */
+
         #[cfg(feature = "backend_debug")]
         let instant = std::time::Instant::now();
         let mut job_count = 0;
@@ -324,46 +345,56 @@ impl EguiVulkanoRenderPass {
             // GPU send only cast
             let vertex_slice: Box<[EguiVulkanoVertex]> = unsafe { std::mem::transmute(vertices) };
             let tx = self.buffers_tx.clone();
-            job_count += 1;
             /*Data uploading*/
-            {
-                self.thread_pool.execute(move || {
-                    let index = index_buffer_pool.chunk(indices.iter().copied()).unwrap();
-                    let vertex = vertex_buffer_pool
-                        .chunk(vertex_slice.iter().copied())
-                        .unwrap();
-                    tx.send(Buffers {
-                        index_buffer: index,
-                        vertex_buffer: vertex,
-                        texture_id,
-                        job_id: job_count,
-                    })
+            self.thread_pool.execute(move || {
+                let index = index_buffer_pool.chunk(indices.iter().copied()).unwrap();
+                let vertex = vertex_buffer_pool
+                    .chunk(vertex_slice.iter().copied())
                     .unwrap();
-                });
-            }
+                tx.send(Buffers {
+                    index_buffer: index,
+                    vertex_buffer: vertex,
+                    texture_id,
+                    job_id: job_count,
+                })
+                .unwrap();
+            });
+            job_count += 1;
         }
-        self.thread_pool.join();
+        //self.thread_pool.join();
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] upload finished in {:?}", instant.elapsed());
-        let mut jobs: Vec<Buffers> = self.buffers_rx.iter().take(job_count).collect();
-        jobs.sort_by_key(|job| job.job_id);
-        let _: Vec<()> = jobs
-            .into_iter()
-            .map(|buffers| {
-                let texture_id = buffers.texture_id;
-                let texture = self.get_descriptor_set(texture_id);
-                let marker = match texture_id {
-                    TextureId::User(_) => IS_USER,
-                    _ => IS_EGUI,
-                };
-                let pc = PushConstants {
-                    u_screen_size: [logical.0 as f32, logical.1 as f32],
-                    marker,
-                };
+        #[cfg(feature = "backend_debug")]
+        println!("Fusion {} meshes", job_count);
+        let draw = |buffers: Buffers| {
+            let texture_id = buffers.texture_id;
+            let texture = self.get_descriptor_set(texture_id);
+            let marker = match texture_id {
+                TextureId::User(_) => IS_USER,
+                _ => IS_EGUI,
+            };
+
+            let layer = {
+                #[cfg(feature = "depth_rendering_mode")]
                 {
-                    #[cfg(feature = "backend_debug")]
-                    println!("Draw!");
-                    pass.draw_indexed(
+                    ((buffers.job_id as f32 / job_count as f32) * std::f32::consts::FRAC_PI_2).cos()
+                }
+                #[cfg(not(feature = "depth_rendering_mode"))]
+                {
+                    0.0
+                }
+            };
+            println!("layer {} z {}", buffers.job_id, layer);
+            let pc = PushConstants {
+                u_screen_size: [logical.0 as f32, logical.1 as f32],
+                marker,
+                layer,
+            };
+            {
+                #[cfg(feature = "backend_debug")]
+                println!("Draw!");
+                command_buffer_builder
+                    .draw_indexed(
                         self.pipeline.clone(),
                         &self.dynamic,
                         buffers.vertex_buffer,
@@ -373,15 +404,36 @@ impl EguiVulkanoRenderPass {
                         vec![],
                     )
                     .unwrap();
-                }
-            })
-            .collect();
+            }
+        };
+        #[cfg(feature = "depth_rendering_mode")]
+        {
+            let _: Vec<()> = self.buffers_rx.iter().take(job_count).map(draw).collect();
+        }
+
+        #[cfg(not(feature = "depth_rendering_mode"))]
+        {
+            /*
+                To avoid image flicker , We use depth buffer.
+            */
+            /*
+                We must take job_counts commands to avoid blocking
+            */
+
+            let mut jobs: Vec<Buffers> = self.buffers_rx.iter().take(job_count).collect();
+            jobs.sort_by_key(|buffers| buffers.job_id);
+            let _: Vec<()> = jobs.into_iter().map(draw).collect();
+        }
+
+        /*
+            We must  enforce to compiler to executable contains this map closure .
+        */
 
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] end frame");
 
-        pass.end_render_pass().unwrap();
-        pass.build().unwrap()
+        command_buffer_builder.end_render_pass().unwrap();
+        command_buffer_builder.build().unwrap()
     }
     /// Update egui system texture
     /// You must call before every  create_command_buffer when drawing content changed
@@ -620,6 +672,20 @@ impl EguiVulkanoRenderPass {
                     .unwrap()
             }
             Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
+        }
+    }
+    fn resize_depth_buffer(&mut self, dimensions: [u32; 2]) {
+        if self.depth_buffer.image().dimensions().width_height() != dimensions {
+            self.depth_buffer = ImageView::new(
+                AttachmentImage::with_usage(
+                    self.device.clone(),
+                    dimensions,
+                    vulkano::format::Format::D32Sfloat,
+                    ImageUsage::transient_depth_stencil_attachment(),
+                )
+                .unwrap(),
+            )
+            .unwrap() as Arc<dyn ImageViewAbstract + Send + Sync>;
         }
     }
     ///  recreate vulkano texture.

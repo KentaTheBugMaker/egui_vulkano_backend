@@ -16,7 +16,7 @@ use vulkano::pipeline::shader::{
 use vulkano::render_pass::{RenderPass, Subpass};
 
 use crate::render_pass::render_pass_desc_from_format;
-use crate::Pipeline;
+use crate::{Pipeline, PushConstants};
 
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
     let vs_module =
@@ -30,6 +30,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     layout(push_constant) uniform UniformBuffer {
         vec2 u_screen_size;
         bool is_egui_system_texture;
+        float layer;
     };
     */
     let pipeline_layout_desc = PipelineLayoutDesc::new(
@@ -69,7 +70,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         ],
         vec![PipelineLayoutDescPcRange {
             offset: 0,
-            size: 12,
+            size: std::mem::size_of::<PushConstants>(),
             stages: ShaderStages {
                 vertex: true,
                 tessellation_control: false,
@@ -151,11 +152,21 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         .unwrap(),
     );
 
-    let pipeline = Arc::new(
-        vulkano::pipeline::GraphicsPipeline::start()
+    let pipeline = Arc::new({
+        let builder = vulkano::pipeline::GraphicsPipeline::start()
             .viewports_dynamic_scissors_irrelevant(1)
-            .render_pass(Subpass::from(render_pass, 0).unwrap())
-            .depth_stencil_disabled()
+            .render_pass(Subpass::from(render_pass, 0).unwrap());
+        let builder = {
+            #[cfg(not(feature = "depth_rendering_mode"))]
+            {
+                builder.depth_stencil_disabled()
+            }
+            #[cfg(feature = "depth_rendering_mode")]
+            {
+                builder.depth_stencil_simple_depth()
+            }
+        };
+        builder
             .fragment_shader(fs_entry, ())
             .vertex_input_single_buffer()
             .vertex_shader(vs_entry, ())
@@ -176,7 +187,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
                 mask_alpha: true,
             })
             .build(device)
-            .unwrap(),
-    );
+            .unwrap()
+    });
     pipeline
 }
