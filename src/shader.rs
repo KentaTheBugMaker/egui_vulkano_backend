@@ -154,7 +154,8 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
 
     let pipeline = Arc::new({
         let builder = vulkano::pipeline::GraphicsPipeline::start()
-            .viewports_dynamic_scissors_irrelevant(1)
+            //.viewports_dynamic_scissors_irrelevant(1)
+            .viewports_scissors_dynamic(1)
             .render_pass(Subpass::from(render_pass, 0).unwrap());
         let builder = {
             #[cfg(not(feature = "depth_rendering_mode"))]

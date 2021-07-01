@@ -30,7 +30,10 @@ cargo run --example demo
 ## known bug
 
 None
-
+## Update v0.6.0
+* parallel buffer upload
+* remove iter_vec dependency
+* proper clipping
 ## Update v0.5.0
 
 * target egui 0.12.0 + vulkano 0.24.0
@@ -84,7 +87,7 @@ None
 
 * doesn't pass color test
 * change tab in sample at debug build cause crash.
-
+* in egui_demo color test scrollbar glitch 
 ## Version list
 
 |egui_vulkano_backend|egui |vulkano |vulkano-shader(dependency) |vulkano-win(if use runner)|
@@ -102,6 +105,7 @@ None
 |0.4.0|0.12.0|0.23.0|none|0.23.0|
 |0.4.1|0.12.0|0.23.0|none|removed|
 |0.5.0|0.12.0|0.24.0|none|removed|
+|0.5.0|0.13|0.24|none|removed|
 
 ## License
 

@@ -16,7 +16,6 @@ depth_rendering_mode=[]
 [dependencies]
 vulkano = "^0.24"
 epi = "0.13"
-iter_vec = "0.1"
 threadpool="1"
 num_cpus="1"
 [dev-dependencies]

@@ -34,7 +34,7 @@ use vulkano::image::{
 };
 use vulkano::memory::pool::StdMemoryPool;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
-use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
@@ -47,6 +47,7 @@ mod shader;
 /*
 same layout as EGUI
 memory layout is specified by Vertex trait
+rust's orphan rule we can't use egui::Vertex directly
 so we can cast from Vertex and send it to GPU directly
 */
 #[repr(C)]
@@ -70,6 +71,7 @@ struct PushConstants {
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 /// same as [egui_wgpu_backend::ScreenDescriptor](https://docs.rs/egui_wgpu_backend/0.8.0/egui_wgpu_backend/struct.ScreenDescriptor.html)
+#[derive(Debug, Copy, Clone)]
 pub struct ScreenDescriptor {
     /// Width of the window in physical pixel.
     pub physical_width: u32,
@@ -88,10 +90,11 @@ impl ScreenDescriptor {
 }
 
 type Pipeline = GraphicsPipeline<SingleBufferDefinition<EguiVulkanoVertex>>;
-struct Buffers {
+struct RenderResource {
     index_buffer: CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>,
     vertex_buffer: CpuBufferPoolChunk<EguiVulkanoVertex, Arc<StdMemoryPool>>,
     texture_id: TextureId,
+    scissor: vulkano::pipeline::viewport::Scissor,
     job_id: usize,
 }
 /// egui rendering command builder
@@ -108,13 +111,12 @@ pub struct EguiVulkanoRenderPass {
     image_staging_buffer: CpuBufferPool<u8>,
     sampler_desc_set: Arc<dyn DescriptorSet + Send + Sync>,
     //set=0 binding=0
-    dynamic: DynamicState,
     image_transfer_requests: BTreeSet<Option<u64>>,
     request_sender: Sender<Work>,
     done_notifier: Receiver<Option<u64>>,
     thread_pool: ThreadPool,
-    buffers_tx: Sender<Buffers>,
-    buffers_rx: Receiver<Buffers>,
+    render_resource_tx: Sender<RenderResource>,
+    render_resource_rx: Receiver<RenderResource>,
 }
 
 fn texture_id_as_option_u64(x: TextureId) -> Option<u64> {
@@ -211,13 +213,13 @@ impl EguiVulkanoRenderPass {
             index_buffer_pool,
             image_staging_buffer,
             sampler_desc_set,
-            dynamic: Default::default(),
+
             image_transfer_requests: BTreeSet::new(),
             request_sender,
             done_notifier,
             thread_pool,
-            buffers_tx,
-            buffers_rx,
+            render_resource_tx: buffers_tx,
+            render_resource_rx: buffers_rx,
         }
     }
 
@@ -305,12 +307,18 @@ impl EguiVulkanoRenderPass {
 
         let physical_height = screen_descriptor.physical_height;
         let physical_width = screen_descriptor.physical_width;
-
-        self.dynamic.viewports = Some(vec![Viewport {
-            origin: [0.0; 2],
-            dimensions: [physical_width as f32, physical_height as f32],
-            depth_range: 0.0..1.0,
-        }]);
+        let mut dynamic = DynamicState {
+            line_width: None,
+            viewports: Some(vec![Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [physical_width as f32, physical_height as f32],
+                depth_range: 0.0..1.0,
+            }]),
+            scissors: None,
+            compare_mask: None,
+            write_mask: None,
+            reference: None,
+        };
 
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] start frame");
@@ -318,17 +326,20 @@ impl EguiVulkanoRenderPass {
         #[cfg(feature = "backend_debug")]
         let instant = std::time::Instant::now();
         let mut job_count = 0;
-        for egui::ClippedMesh(_, mesh) in paint_jobs {
+
+        for egui::ClippedMesh(rect, mesh) in paint_jobs {
+            let scissor = calc_scissor(rect, *screen_descriptor);
+            if mesh.is_empty() || scissor.is_none() {
+                #[cfg(feature = "backend_debug")]
+                println!("[BackEnd] Detect glitch mesh");
+                continue;
+            }
+
             let indices = mesh.indices.into_boxed_slice();
             let vertices = mesh.vertices.into_boxed_slice();
             let texture_id = mesh.texture_id;
             let index_buffer_pool = self.index_buffer_pool.clone();
             let vertex_buffer_pool = self.vertex_buffer_pool.clone();
-            if vertices.is_empty() || indices.is_empty() {
-                #[cfg(feature = "backend_debug")]
-                println!("[BackEnd] Detect glitch mesh");
-                continue;
-            }
 
             #[cfg(feature = "backend_debug")]
             println!("Fission");
@@ -344,30 +355,32 @@ impl EguiVulkanoRenderPass {
             // use same memory layout
             // GPU send only cast
             let vertex_slice: Box<[EguiVulkanoVertex]> = unsafe { std::mem::transmute(vertices) };
-            let tx = self.buffers_tx.clone();
+            let tx = self.render_resource_tx.clone();
             /*Data uploading*/
             self.thread_pool.execute(move || {
                 let index = index_buffer_pool.chunk(indices.iter().copied()).unwrap();
                 let vertex = vertex_buffer_pool
                     .chunk(vertex_slice.iter().copied())
                     .unwrap();
-                tx.send(Buffers {
+                tx.send(RenderResource {
                     index_buffer: index,
                     vertex_buffer: vertex,
                     texture_id,
+                    scissor: scissor.unwrap(),
                     job_id: job_count,
                 })
                 .unwrap();
             });
             job_count += 1;
         }
-        //self.thread_pool.join();
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] upload finished in {:?}", instant.elapsed());
         #[cfg(feature = "backend_debug")]
         println!("Fusion {} meshes", job_count);
-        let draw = |buffers: Buffers| {
-            let texture_id = buffers.texture_id;
+
+        let draw = |render_resource: RenderResource| {
+            let texture_id = render_resource.texture_id;
+            dynamic.scissors = Some(vec![render_resource.scissor]);
             let texture = self.get_descriptor_set(texture_id);
             let marker = match texture_id {
                 TextureId::User(_) => IS_USER,
@@ -377,14 +390,17 @@ impl EguiVulkanoRenderPass {
             let layer = {
                 #[cfg(feature = "depth_rendering_mode")]
                 {
-                    ((buffers.job_id as f32 / job_count as f32) * std::f32::consts::FRAC_PI_2).cos()
+                    ((render_resource.job_id as f32 / job_count as f32)
+                        * std::f32::consts::FRAC_PI_2)
+                        .cos()
                 }
                 #[cfg(not(feature = "depth_rendering_mode"))]
                 {
                     0.0
                 }
             };
-            println!("layer {} z {}", buffers.job_id, layer);
+            #[cfg(feature = "backend_debug")]
+            println!("layer {} z {}", render_resource.job_id, layer);
             let pc = PushConstants {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
                 marker,
@@ -396,9 +412,9 @@ impl EguiVulkanoRenderPass {
                 command_buffer_builder
                     .draw_indexed(
                         self.pipeline.clone(),
-                        &self.dynamic,
-                        buffers.vertex_buffer,
-                        buffers.index_buffer,
+                        &dynamic,
+                        render_resource.vertex_buffer,
+                        render_resource.index_buffer,
                         (self.sampler_desc_set.clone(), texture),
                         pc,
                         vec![],
@@ -408,30 +424,30 @@ impl EguiVulkanoRenderPass {
         };
         #[cfg(feature = "depth_rendering_mode")]
         {
-            let _: Vec<()> = self.buffers_rx.iter().take(job_count).map(draw).collect();
+            let _: Vec<()> = self
+                .render_resource_rx
+                .iter()
+                .take(job_count)
+                .map(draw)
+                .collect();
         }
 
         #[cfg(not(feature = "depth_rendering_mode"))]
         {
             /*
-                To avoid image flicker , We use depth buffer.
+                To avoid image flicker , We sort by job id
             */
             /*
                 We must take job_counts commands to avoid blocking
             */
 
-            let mut jobs: Vec<Buffers> = self.buffers_rx.iter().take(job_count).collect();
-            jobs.sort_by_key(|buffers| buffers.job_id);
+            let mut jobs: Vec<RenderResource> =
+                self.render_resource_rx.iter().take(job_count).collect();
+            jobs.sort_by_key(|render_resource| render_resource.job_id);
             let _: Vec<()> = jobs.into_iter().map(draw).collect();
         }
-
-        /*
-            We must  enforce to compiler to executable contains this map closure .
-        */
-
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] end frame");
-
         command_buffer_builder.end_render_pass().unwrap();
         command_buffer_builder.build().unwrap()
     }
@@ -766,5 +782,49 @@ pub enum RenderTarget {
     /// render to own framebuffer
     FrameBufferIndex(usize),
 }
+/*
+used for 0 sized area erasing
+*/
+fn calc_scissor(
+    clip_rect: egui::emath::Rect,
+    screen_desc: ScreenDescriptor,
+) -> Option<vulkano::pipeline::viewport::Scissor> {
+    let pixels_per_point = screen_desc.scale_factor;
+    let width_in_pixels = screen_desc.physical_width;
+    let height_in_pixels = screen_desc.physical_height;
+    /*
+    shamelessly copy from egui_glium
+    */
+    // Transform clip rect to physical pixels:
+    let clip_min_x = pixels_per_point * clip_rect.min.x;
+    let clip_min_y = pixels_per_point * clip_rect.min.y;
+    let clip_max_x = pixels_per_point * clip_rect.max.x;
+    let clip_max_y = pixels_per_point * clip_rect.max.y;
 
+    // Make sure clip rect can fit withing an `u32`:
+    let clip_min_x = clip_min_x.clamp(0.0, width_in_pixels as f32);
+    let clip_min_y = clip_min_y.clamp(0.0, height_in_pixels as f32);
+    let clip_max_x = clip_max_x.clamp(clip_min_x, width_in_pixels as f32);
+    let clip_max_y = clip_max_y.clamp(clip_min_y, height_in_pixels as f32);
+
+    let clip_min_x = clip_min_x.round() as u32;
+    let clip_min_y = clip_min_y.round() as u32;
+    let clip_max_x = clip_max_x.round() as u32;
+    let clip_max_y = clip_max_y.round() as u32;
+    let width = clip_max_x - clip_min_x;
+    let height = clip_max_y - clip_min_y;
+    #[cfg(feature = "backend_debug")]
+    println!(
+        "clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
+        clip_min_x, clip_min_y, width, height
+    );
+    if (width == 0) | (height == 0) {
+        None
+    } else {
+        Some(Scissor {
+            origin: [clip_min_x as i32, clip_min_y as i32],
+            dimensions: [width as u32, height as u32],
+        })
+    }
+}
 struct TextureDescriptor(Arc<dyn DescriptorSet + Send + Sync>);
