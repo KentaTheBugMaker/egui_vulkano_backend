@@ -19,6 +19,8 @@ use crate::render_pass::render_pass_desc_from_format;
 use crate::{Pipeline, PushConstants};
 
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
+    //this is safe because we use offline compiled shader binary and shipped with this backend
+
     let vs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
     let fs_module =
@@ -82,6 +84,11 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         }],
     )
     .unwrap();
+    /*
+        # SAFETY
+        [x] one entry per location
+        [x] each format must not be larger than 128bit
+    */
     let vs_in = unsafe {
         ShaderInterface::new_unchecked(vec![
             ShaderInterfaceEntry {

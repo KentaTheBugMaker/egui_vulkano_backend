@@ -46,23 +46,26 @@ fn main() {
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(
         None,
-        Version {
-            major: 1,
-            minor: 2,
-            patch: 0,
-        },
+        Version::V1_0,
         &required_extensions,
         None,
     )
     .unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
-    let physical_properties = physical.properties();
-    println!(
-        "Using device: {} (type: {:?})",
-        physical_properties.device_name.as_ref().unwrap(),
-        physical_properties.device_type.as_ref().unwrap()
-    );
-
+    let physical_properties = physical.properties().clone();
+    let gpu_name = physical_properties.device_name.unwrap();
+    let gpu_type = physical_properties.device_type.unwrap();
+    let heap_infos: Vec<String> = physical
+        .memory_heaps()
+        .map(|heap| {
+            format!(
+                "Bytes : {}\nDevice local : {} \nMulti instance : {} \n",
+                heap.size(),
+                heap.is_device_local(),
+                heap.is_multi_instance()
+            )
+        })
+        .collect();
     let event_loop = EventLoop::with_user_event();
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
@@ -197,7 +200,17 @@ fn main() {
 
                 // Draw the demo application.
                 demo_app.update(&platform.context(), &mut frame);
-
+                egui::Window::new("Your Hardware").show(&platform.context(), |ui| {
+                    ui.label(format!("GPU type : {:?}", gpu_type));
+                    ui.label(format!("GPU name : {}", gpu_name));
+                    ui.label("Heaps");
+                    let _: Vec<()> = heap_infos
+                        .iter()
+                        .map(|info| {
+                            ui.label(info);
+                        })
+                        .collect();
+                });
                 // End the UI frame. We could now handle the output and draw the UI with the backend.
                 let (output, paint_commands) = platform.end_frame();
                 let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;

@@ -7,10 +7,10 @@
 //! * parallel data uploading
 extern crate vulkano;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::shader::create_pipeline;
 use epi::egui;
@@ -21,8 +21,7 @@ use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
 use vulkano::buffer::{BufferUsage, CpuBufferPool};
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::command_buffer::{
-    CommandBufferExecFuture, CommandBufferUsage, DynamicState, PrimaryAutoCommandBuffer,
-    SubpassContents,
+    CommandBufferUsage, DynamicState, PrimaryAutoCommandBuffer, SubpassContents,
 };
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::DescriptorSet;
@@ -39,7 +38,7 @@ use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
-use vulkano::sync::{GpuFuture, NowFuture};
+use vulkano::sync::GpuFuture;
 
 mod render_pass;
 
@@ -47,7 +46,8 @@ mod shader;
 /*
 same layout as EGUI
 memory layout is specified by Vertex trait
-rust's orphan rule we can't use egui::Vertex directly
+rust's orphan rule we can't use egui::Vertex directly ie . we can't do this
+vulkano::impl_vertex!(egui::epaint::Vertex,pos,uv,color);
 so we can cast from Vertex and send it to GPU directly
 */
 #[repr(C)]
@@ -111,9 +111,6 @@ pub struct EguiVulkanoRenderPass {
     image_staging_buffer: CpuBufferPool<u8>,
     sampler_desc_set: Arc<dyn DescriptorSet + Send + Sync>,
     //set=0 binding=0
-    image_transfer_requests: BTreeSet<Option<u64>>,
-    request_sender: Sender<Work>,
-    done_notifier: Receiver<Option<u64>>,
     thread_pool: ThreadPool,
     render_resource_tx: Sender<RenderResource>,
     render_resource_rx: Receiver<RenderResource>,
@@ -124,24 +121,6 @@ fn texture_id_as_option_u64(x: TextureId) -> Option<u64> {
         TextureId::Egui => None,
         TextureId::User(id) => Some(id),
     }
-}
-
-type Work = (
-    Option<u64>,
-    CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>,
-);
-
-fn spawn_image_upload_thread() -> (Sender<Work>, Receiver<Option<u64>>) {
-    let (tx, rx): (Sender<Work>, Receiver<Work>) = std::sync::mpsc::channel();
-    let (notifier, getter) = std::sync::mpsc::channel();
-    let rx = Mutex::new(rx);
-    std::thread::spawn(move || {
-        for request in rx.lock().unwrap().iter() {
-            request.1.flush().unwrap();
-            notifier.send(request.0).unwrap();
-        }
-    });
-    (tx, getter)
 }
 /*
 We use Option<u64> as TextureId
@@ -180,7 +159,6 @@ impl EguiVulkanoRenderPass {
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
         let image_staging_buffer =
             CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
-        let (request_sender, done_notifier) = spawn_image_upload_thread();
         let sampler_desc_set = Arc::new(
             PersistentDescriptorSet::start(
                 pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
@@ -213,10 +191,6 @@ impl EguiVulkanoRenderPass {
             index_buffer_pool,
             image_staging_buffer,
             sampler_desc_set,
-
-            image_transfer_requests: BTreeSet::new(),
-            request_sender,
-            done_notifier,
             thread_pool,
             render_resource_tx: buffers_tx,
             render_resource_rx: buffers_rx,
@@ -373,10 +347,6 @@ impl EguiVulkanoRenderPass {
             });
             job_count += 1;
         }
-        #[cfg(feature = "backend_debug")]
-        println!("[BackEnd] upload finished in {:?}", instant.elapsed());
-        #[cfg(feature = "backend_debug")]
-        println!("Fusion {} meshes", job_count);
 
         let draw = |render_resource: RenderResource| {
             let texture_id = render_resource.texture_id;
@@ -436,13 +406,15 @@ impl EguiVulkanoRenderPass {
         {
             /*
                 To avoid image flicker , We sort by job id
-            */
-            /*
                 We must take job_counts commands to avoid blocking
             */
 
             let mut jobs: Vec<RenderResource> =
                 self.render_resource_rx.iter().take(job_count).collect();
+            #[cfg(feature = "backend_debug")]
+            println!("[BackEnd] upload finished in {:?}", instant.elapsed());
+            #[cfg(feature = "backend_debug")]
+            println!("Fusion {} meshes", job_count);
             jobs.sort_by_key(|render_resource| render_resource.job_id);
             let _: Vec<()> = jobs.into_iter().map(draw).collect();
         }
@@ -454,42 +426,16 @@ impl EguiVulkanoRenderPass {
     /// Update egui system texture
     /// You must call before every  create_command_buffer when drawing content changed
     pub fn request_upload_egui_texture(&mut self, texture: &Texture) {
-        //no change
-        if self.egui_texture_version == Some(texture.version) {
-            return;
-        }
-        let staging_sub_buffer = self
-            .image_staging_buffer
-            .chunk(texture.pixels.iter().copied())
-            .unwrap();
-        let image = vulkano::image::ImmutableImage::from_buffer(
-            staging_sub_buffer,
-            ImageDimensions::Dim2d {
-                width: texture.width as u32,
-                height: texture.height as u32,
-                array_layers: 1,
-            },
-            MipmapsCount::One,
-            vulkano::format::Format::R8Unorm,
-            self.queue.clone(),
+        self.set_texture(
+            TextureId::Egui,
+            &texture.pixels,
+            (texture.width as u32, texture.height as u32),
+            Some(texture.version),
         )
-        .unwrap();
-        self.request_sender
-            .send((None, image.1))
-            .expect("[BackEnd] failed to send system texture upload request");
-        let image_view = ImageView::new(image.0).unwrap();
-        let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
-        let pipeline = self.pipeline.clone();
-        let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view);
-        self.egui_textures
-            .insert(None, Some(TextureDescriptor(texture_desc)));
-        self.egui_texture_version = Some(texture.version);
     }
-
+    #[inline(always)]
     fn alloc_user_texture(&mut self) -> TextureId {
-        /*
-        if we find empty slot
-        */
+        //if we find empty slot
         for (i, tex) in self.egui_textures.iter() {
             if tex.is_none() && i.is_some() {
                 return TextureId::User(i.unwrap());
@@ -507,33 +453,14 @@ impl EguiVulkanoRenderPass {
         self.egui_textures.insert(Some(id as u64), None);
         TextureId::User(id as u64)
     }
+    #[inline(always)]
     fn free_user_texture(&mut self, id: TextureId) {
         let t_id = texture_id_as_option_u64(id);
         self.egui_textures
             .get_mut(&t_id)
             .and_then(|option| option.take());
     }
-    /// waiting image upload done.
-    ///
-    /// usually you don't need to call .
-    ///
-    /// this cause blocking but ensure no image glitch.
-    ///
-    /// you must call before  create command buffer
-    pub fn wait_texture_upload(&mut self) {
-        //wait
-        // check request is not empty
-        if !self.image_transfer_requests.is_empty() {
-            for done in self.done_notifier.iter() {
-                #[cfg(feature = "backend_debug")]
-                println!("[BackEnd] image upload finished : {:?}", done);
-                self.image_transfer_requests.remove(&done);
-                if self.image_transfer_requests.is_empty() {
-                    break;
-                }
-            }
-        }
-    }
+    #[inline(always)]
     fn create_descriptor_set_from_view(
         pipeline: Arc<Pipeline>,
         image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
@@ -548,15 +475,61 @@ impl EguiVulkanoRenderPass {
             .unwrap(),
         )
     }
+    #[inline(always)]
     fn get_descriptor_set(&self, texture_id: TextureId) -> Arc<dyn DescriptorSet + Send + Sync> {
         let t_id = texture_id_as_option_u64(texture_id);
         self.egui_textures
             .get(&t_id)
-            .unwrap()
+            .expect("[BackEnd] invalid Texture ID given")
             .as_ref()
-            .unwrap()
+            .expect("[BackEnd] access to freed image")
             .0
             .clone()
+    }
+    #[inline(always)]
+    fn set_texture(
+        &mut self,
+        id: TextureId,
+        pixels: &[u8],
+        size: (u32, u32),
+        version: Option<u64>,
+    ) {
+
+        let format = match id {
+            TextureId::Egui =>{
+                if self.egui_texture_version==version{
+                    return;
+                }
+                self.egui_texture_version=version;
+                vulkano::format::Format::R8Unorm
+            },
+            TextureId::User(_) => vulkano::format::Format::R8G8B8A8Srgb,
+        };
+        let staging_sub_buffer = self
+            .image_staging_buffer
+            .chunk(pixels.iter().copied())
+            .unwrap();
+
+        let (image, future) = vulkano::image::ImmutableImage::from_buffer(
+            staging_sub_buffer,
+            ImageDimensions::Dim2d {
+                width: size.0,
+                height: size.1,
+                array_layers: 1,
+            },
+            MipmapsCount::One,
+            format,
+            self.queue.clone(),
+        )
+        .unwrap();
+        let t_id = texture_id_as_option_u64(id);
+        self.thread_pool.execute(move || future.flush().unwrap());
+        let image_view = ImageView::new(image).unwrap() as Arc<dyn ImageViewAbstract + Sync + Send>;
+        let pipeline = self.pipeline.clone();
+        let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view);
+        self.egui_textures
+            .insert(t_id, Some(TextureDescriptor(texture_desc)));
+
     }
     pub fn set_user_texture(
         &mut self,
@@ -564,49 +537,10 @@ impl EguiVulkanoRenderPass {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
-        #[cfg(feature = "backend_debug")]
-        println!("new texture arrived {:?}", id);
-        let t_id = texture_id_as_option_u64(id);
-        let image_staging_buffer = self.image_staging_buffer.clone();
-        let pipeline = self.pipeline.clone();
-        let queue = self.queue.clone();
-        let sender = self.request_sender.clone();
-        let is_executed =
-            self.egui_textures
-                .get_mut(&t_id)
-                .map(|slot: &mut Option<TextureDescriptor>| {
-                    // SAFETY: GPU send only cast
-                    let pixels = unsafe {
-                        std::slice::from_raw_parts(
-                            srgba_pixels.as_ptr() as *const u8,
-                            srgba_pixels.len() * 4,
-                        )
-                    };
-                    let sub_buffer = image_staging_buffer.chunk(pixels.iter().copied()).unwrap();
-                    let (image, future) = vulkano::image::ImmutableImage::from_buffer(
-                        sub_buffer,
-                        ImageDimensions::Dim2d {
-                            width: size.0 as u32,
-                            height: size.1 as u32,
-                            array_layers: 1,
-                        },
-                        MipmapsCount::One,
-                        vulkano::format::Format::R8G8B8A8Srgb,
-                        queue,
-                    )
-                    .unwrap();
-                    sender
-                        .send((t_id, future))
-                        .expect("failed to send image copy request");
-
-                    let image_view = ImageView::new(image).unwrap();
-                    let image_view = image_view as Arc<dyn ImageViewAbstract + Sync + Send>;
-                    let desc = Self::create_descriptor_set_from_view(pipeline, image_view);
-                    slot.replace(TextureDescriptor(desc));
-                });
-        if is_executed.is_some() {
-            self.image_transfer_requests.insert(t_id);
-        }
+        let pixels = unsafe {
+            std::slice::from_raw_parts(srgba_pixels.as_ptr() as *const u8, srgba_pixels.len() * 4)
+        };
+        self.set_texture(id, pixels, (size.0 as u32, size.1 as u32), None);
     }
     /// register vulkano image view as egui texture
     ///

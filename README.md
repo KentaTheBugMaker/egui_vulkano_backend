@@ -30,6 +30,9 @@ cargo run --example demo
 ## known bug
 
 None
+## Not released
+* remove wait_image_upload
+* demo change
 ## Update v0.6.0
 * parallel buffer upload
 * remove iter_vec dependency
