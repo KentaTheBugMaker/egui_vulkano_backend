@@ -44,13 +44,7 @@ fn main() {
     // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(
-        None,
-        Version::V1_0,
-        &required_extensions,
-        None,
-    )
-    .unwrap();
+    let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     let physical_properties = physical.properties().clone();
     let gpu_name = physical_properties.device_name.unwrap();

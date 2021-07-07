@@ -494,15 +494,14 @@ impl EguiVulkanoRenderPass {
         size: (u32, u32),
         version: Option<u64>,
     ) {
-
         let format = match id {
-            TextureId::Egui =>{
-                if self.egui_texture_version==version{
+            TextureId::Egui => {
+                if self.egui_texture_version == version {
                     return;
                 }
-                self.egui_texture_version=version;
+                self.egui_texture_version = version;
                 vulkano::format::Format::R8Unorm
-            },
+            }
             TextureId::User(_) => vulkano::format::Format::R8G8B8A8Srgb,
         };
         let staging_sub_buffer = self
@@ -529,7 +528,6 @@ impl EguiVulkanoRenderPass {
         let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view);
         self.egui_textures
             .insert(t_id, Some(TextureDescriptor(texture_desc)));
-
     }
     pub fn set_user_texture(
         &mut self,
