@@ -27,9 +27,10 @@ use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::DescriptorSet;
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
+#[cfg(feature = "depth_rendering_mode")]
+use vulkano::image::ImageAccess;
 use vulkano::image::{
-    AttachmentImage, ImageAccess, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount,
-    SwapchainImage,
+    AttachmentImage, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage,
 };
 use vulkano::memory::pool::StdMemoryPool;
 use vulkano::pipeline::vertex::SingleBufferDefinition;
@@ -44,7 +45,7 @@ mod render_pass;
 
 mod shader;
 /*
-same layout as EGUI
+same layout as egui
 memory layout is specified by Vertex trait
 rust's orphan rule we can't use egui::Vertex directly ie . we can't do this
 vulkano::impl_vertex!(egui::epaint::Vertex,pos,uv,color);
@@ -105,6 +106,7 @@ pub struct EguiVulkanoRenderPass {
     device: Arc<Device>,
     queue: Arc<Queue>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    #[cfg(feature = "depth_rendering_mode")]
     depth_buffer: Arc<dyn ImageViewAbstract + Send + Sync>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
@@ -152,7 +154,7 @@ impl EguiVulkanoRenderPass {
             0.0,
             0.0,
         )
-        .unwrap();
+        .expect("failed to create sampler");
         let thread_pool = ThreadPool::new(num_cpus::get());
 
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
@@ -169,6 +171,7 @@ impl EguiVulkanoRenderPass {
             .unwrap(),
         ) as Arc<dyn DescriptorSet + Send + Sync>;
         let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
+        #[cfg(feature = "depth_rendering_mode")]
         let depth_buffer = ImageView::new(
             AttachmentImage::with_usage(
                 device.clone(),
@@ -186,6 +189,7 @@ impl EguiVulkanoRenderPass {
             device,
             queue,
             frame_buffers: vec![],
+            #[cfg(feature = "depth_rendering_mode")]
             depth_buffer,
             vertex_buffer_pool,
             index_buffer_pool,
@@ -202,20 +206,19 @@ impl EguiVulkanoRenderPass {
         &mut self,
         swap_chain_images: &[Arc<SwapchainImage<Wnd>>],
     ) {
+        #[cfg(feature = "depth_rendering_mode")]
         self.resize_depth_buffer(swap_chain_images[0].dimensions().width_height());
         self.frame_buffers = swap_chain_images
             .iter()
             .map(|image| {
                 let view = ImageView::new(image.clone()).unwrap();
-                Arc::new(
-                    Framebuffer::start(self.pipeline.clone().render_pass().clone())
-                        .add(view)
-                        .unwrap()
-                        .add(self.depth_buffer.clone())
-                        .unwrap()
-                        .build()
-                        .unwrap(),
-                ) as Arc<dyn FramebufferAbstract + Send + Sync>
+                let fb = Framebuffer::start(self.pipeline.render_pass().clone())
+                    .add(view)
+                    .unwrap();
+                #[cfg(feature = "depth_rendering_mode")]
+                let fb = fb.add(self.depth_buffer.clone()).unwrap();
+
+                Arc::new(fb.build().unwrap()) as Arc<dyn FramebufferAbstract + Send + Sync>
             })
             .collect::<Vec<_>>();
     }
@@ -247,16 +250,14 @@ impl EguiVulkanoRenderPass {
     ) -> PrimaryAutoCommandBuffer<StandardCommandPoolAlloc> {
         let framebuffer = match render_target {
             RenderTarget::ColorAttachment(color_attachment) => {
+                #[cfg(feature = "depth_rendering_mode")]
                 self.resize_depth_buffer(color_attachment.image().dimensions().width_height());
-                Arc::new(
-                    vulkano::render_pass::Framebuffer::start(self.pipeline.render_pass().clone())
-                        .add(color_attachment)
-                        .unwrap()
-                        .add(self.depth_buffer.clone())
-                        .unwrap()
-                        .build()
-                        .expect("[BackEnd] failed to create frame buffer"),
-                )
+                let fb = Framebuffer::start(self.pipeline.render_pass().clone())
+                    .add(color_attachment)
+                    .unwrap();
+                #[cfg(feature = "depth_rendering_mode")]
+                let fb = fb.add(self.depth_buffer.clone()).unwrap();
+                Arc::new(fb.build().expect("[BackEnd] failed to create frame buffer"))
             }
             RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
         };
@@ -275,7 +276,10 @@ impl EguiVulkanoRenderPass {
             .begin_render_pass(
                 framebuffer,
                 SubpassContents::Inline,
+                #[cfg(feature = "depth_rendering_mode")]
                 vec![[0.0, 0.0, 0.0, 0.0].into(), 1.0.into()],
+                #[cfg(not(feature = "depth_rendering_mode"))]
+                vec![[0.0; 4].into()],
             )
             .unwrap();
 
@@ -297,7 +301,7 @@ impl EguiVulkanoRenderPass {
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] start frame");
 
-        #[cfg(feature = "backend_debug")]
+        #[cfg(all(feature = "backend_debug", not(feature = "depth_rendering_mode")))]
         let instant = std::time::Instant::now();
         let mut job_count = 0;
 
@@ -316,7 +320,7 @@ impl EguiVulkanoRenderPass {
             let vertex_buffer_pool = self.vertex_buffer_pool.clone();
 
             #[cfg(feature = "backend_debug")]
-            println!("Fission");
+            println!("[BackEnd] Fission");
             #[cfg(feature = "backend_debug")]
             println!(
                 "[BackEnd] mesh {}  vertices {} indices {} texture_id {:?}",
@@ -325,9 +329,11 @@ impl EguiVulkanoRenderPass {
                 indices.len(),
                 texture_id
             );
-            // safe
-            // use same memory layout
-            // GPU send only cast
+            /*
+            safe
+            use same memory layout
+            GPU send only cast
+            */
             let vertex_slice: Box<[EguiVulkanoVertex]> = unsafe { std::mem::transmute(vertices) };
             let tx = self.render_resource_tx.clone();
             /*Data uploading*/
@@ -426,6 +432,13 @@ impl EguiVulkanoRenderPass {
     /// Update egui system texture
     /// You must call before every  create_command_buffer when drawing content changed
     pub fn request_upload_egui_texture(&mut self, texture: &Texture) {
+        assert!(
+            (texture.width * texture.height) >= texture.pixels.len(),
+            "Invalid pixels in EGUI system texture given {} x {} actual {} pixels",
+            texture.width,
+            texture.height,
+            texture.pixels.len()
+        );
         self.set_texture(
             TextureId::Egui,
             &texture.pixels,
@@ -436,11 +449,14 @@ impl EguiVulkanoRenderPass {
     #[inline(always)]
     fn alloc_user_texture(&mut self) -> TextureId {
         //if we find empty slot
-        for (i, tex) in self.egui_textures.iter() {
-            if tex.is_none() && i.is_some() {
-                return TextureId::User(i.unwrap());
-            }
-        }
+        //refuse egui system texture
+        if let Some(empty_slot) = self
+            .egui_textures
+            .iter()
+            .find(|entry| entry.0.is_some() && entry.1.is_none())
+        {
+            return TextureId::User(empty_slot.0.unwrap());
+        };
         /*
                 Compatibility for glium backend .
             Because glium's TextureId start from 0.
@@ -535,6 +551,13 @@ impl EguiVulkanoRenderPass {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) {
+        assert!(
+            (size.0 * size.1) >= srgba_pixels.len(),
+            "Pixel count was invalid given {} x {} actual pixels {}",
+            size.0,
+            size.1,
+            srgba_pixels.len()
+        );
         let pixels = unsafe {
             std::slice::from_raw_parts(srgba_pixels.as_ptr() as *const u8, srgba_pixels.len() * 4)
         };
@@ -622,6 +645,7 @@ impl EguiVulkanoRenderPass {
             Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
         }
     }
+    #[cfg(feature = "depth_rendering_mode")]
     fn resize_depth_buffer(&mut self, dimensions: [u32; 2]) {
         if self.depth_buffer.image().dimensions().width_height() != dimensions {
             self.depth_buffer = ImageView::new(
@@ -747,7 +771,7 @@ fn calc_scissor(
     let height = clip_max_y - clip_min_y;
     #[cfg(feature = "backend_debug")]
     println!(
-        "clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
+        "[BackEnd] clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
         clip_min_x, clip_min_y, width, height
     );
     if (width == 0) | (height == 0) {

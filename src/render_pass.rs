@@ -18,6 +18,7 @@ pub(crate) fn render_pass_desc_from_format(format: Format) -> RenderPassDesc {
         initial_layout: ImageLayout::ColorAttachmentOptimal,
         final_layout: ImageLayout::ColorAttachmentOptimal,
     };
+    #[cfg(feature = "depth_rendering_mode")]
     let depth_attachment = AttachmentDesc {
         format: vulkano::format::Format::D32Sfloat,
         samples: SampleCount::Sample1,
@@ -30,13 +31,19 @@ pub(crate) fn render_pass_desc_from_format(format: Format) -> RenderPassDesc {
     };
     let sub_pass_desc = SubpassDesc {
         color_attachments: vec![(0, ImageLayout::ColorAttachmentOptimal)],
+        #[cfg(feature = "depth_rendering_mode")]
         depth_stencil: Some((1, ImageLayout::DepthStencilAttachmentOptimal)),
+        #[cfg(not(feature = "depth_rendering_mode"))]
+        depth_stencil: None,
         input_attachments: vec![],
         resolve_attachments: vec![],
         preserve_attachments: vec![],
     };
     RenderPassDesc::new(
+        #[cfg(feature = "depth_rendering_mode")]
         vec![attachment_desc, depth_attachment],
+        #[cfg(not(feature = "depth_rendering_mode"))]
+        vec![attachment_desc],
         vec![sub_pass_desc],
         vec![],
     )
