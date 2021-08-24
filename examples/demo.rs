@@ -8,7 +8,7 @@ use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::App;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
-use vulkano::instance::{Instance, PhysicalDevice};
+use vulkano::instance::Instance;
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use vulkano::{swapchain, Version};
@@ -19,6 +19,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
 use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
+use vulkano::device::physical::PhysicalDevice;
 
 /// A custom event type for the winit app.
 enum EguiEvent {
@@ -47,8 +48,8 @@ fn main() {
     let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     let physical_properties = physical.properties().clone();
-    let gpu_name = physical_properties.device_name.unwrap();
-    let gpu_type = physical_properties.device_type.unwrap();
+    let gpu_name = physical_properties.device_name;
+    let gpu_type = physical_properties.device_type;
     let heap_infos: Vec<String> = physical
         .memory_heaps()
         .map(|heap| {

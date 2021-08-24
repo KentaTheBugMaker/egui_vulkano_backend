@@ -1,22 +1,22 @@
 use std::ffi::CString;
 use std::sync::Arc;
 
-use vulkano::descriptor::descriptor::{
-    DescriptorDesc, DescriptorDescTy, DescriptorImageDesc, DescriptorImageDescArray,
-    DescriptorImageDescDimensions, ShaderStages,
-};
 use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
-use vulkano::pipeline::layout::{PipelineLayoutDesc, PipelineLayoutDescPcRange};
+use vulkano::pipeline::layout::PipelineLayoutPcRange;
 use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
+    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
 };
 use vulkano::render_pass::{RenderPass, Subpass};
 
 use crate::render_pass::render_pass_desc_from_format;
-use crate::{Pipeline, PushConstants};
+use crate::{EguiVulkanoVertex, Pipeline, PushConstants};
+use vulkano::descriptor_set::layout::{
+    DescriptorDesc, DescriptorDescTy, DescriptorImageDesc, DescriptorImageDescArray,
+    DescriptorImageDescDimensions, DescriptorSetDesc,
+};
 
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
     //this is safe because we use offline compiled shader binary and shipped with this backend
@@ -35,55 +35,52 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         float layer;
     };
     */
-    let pipeline_layout_desc = PipelineLayoutDesc::new(
-        vec![
-            vec![Some(DescriptorDesc {
-                ty: DescriptorDescTy::Sampler,
-                array_count: 1,
-                stages: ShaderStages {
-                    vertex: false,
-                    tessellation_control: false,
-                    tessellation_evaluation: false,
-                    geometry: false,
-                    fragment: true,
-                    compute: false,
-                },
-                readonly: true,
-            })],
-            vec![Some(DescriptorDesc {
-                ty: DescriptorDescTy::Image(DescriptorImageDesc {
-                    sampled: true,
-                    dimensions: DescriptorImageDescDimensions::TwoDimensional,
-                    format: None,
-                    multisampled: false,
-                    array_layers: DescriptorImageDescArray::NonArrayed,
-                }),
-                array_count: 1,
-                stages: ShaderStages {
-                    vertex: false,
-                    tessellation_control: false,
-                    tessellation_evaluation: false,
-                    geometry: false,
-                    fragment: true,
-                    compute: false,
-                },
-                readonly: true,
-            })],
-        ],
-        vec![PipelineLayoutDescPcRange {
-            offset: 0,
-            size: std::mem::size_of::<PushConstants>(),
-            stages: ShaderStages {
-                vertex: true,
-                tessellation_control: false,
-                tessellation_evaluation: false,
-                geometry: false,
-                fragment: true,
-                compute: false,
-            },
-        }],
-    )
-    .unwrap();
+    let pc_range = Some(PipelineLayoutPcRange {
+        offset: 0,
+        size: std::mem::size_of::<PushConstants>(),
+        stages: ShaderStages {
+            vertex: true,
+            tessellation_control: false,
+            tessellation_evaluation: false,
+            geometry: false,
+            fragment: true,
+            compute: false,
+        },
+    });
+
+    let descriptor_set_desc_0 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
+        ty: DescriptorDescTy::Sampler,
+        array_count: 1,
+        stages: ShaderStages {
+            vertex: false,
+            tessellation_control: false,
+            tessellation_evaluation: false,
+            geometry: false,
+            fragment: true,
+            compute: false,
+        },
+        readonly: true,
+    })]);
+    let descriptor_set_desc_1 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
+        ty: DescriptorDescTy::Image(DescriptorImageDesc {
+            sampled: true,
+            dimensions: DescriptorImageDescDimensions::TwoDimensional,
+            format: None,
+            multisampled: false,
+            array_layers: DescriptorImageDescArray::NonArrayed,
+        }),
+        array_count: 1,
+        stages: ShaderStages {
+            vertex: false,
+            tessellation_control: false,
+            tessellation_evaluation: false,
+            geometry: false,
+            fragment: true,
+            compute: false,
+        },
+        readonly: true,
+    })]);
+    let descriptor_sets = vec![descriptor_set_desc_0, descriptor_set_desc_1];
     /*
         # SAFETY
         [x] one entry per location
@@ -133,7 +130,8 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     let vs_entry = unsafe {
         vs_module.graphics_entry_point(
             &main,
-            pipeline_layout_desc.clone(),
+            descriptor_sets.clone(),
+            pc_range,
             spec,
             vs_in,
             vs_out.clone(),
@@ -144,7 +142,8 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     let fs_entry = unsafe {
         fs_module.graphics_entry_point(
             &main,
-            pipeline_layout_desc,
+            descriptor_sets,
+            pc_range,
             spec,
             vs_out,
             fs_out,
@@ -160,27 +159,16 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     );
 
     let pipeline = Arc::new({
-        let builder = vulkano::pipeline::GraphicsPipeline::start()
-            //.viewports_dynamic_scissors_irrelevant(1)
+        vulkano::pipeline::GraphicsPipeline::start()
             .viewports_scissors_dynamic(1)
-            .render_pass(Subpass::from(render_pass, 0).unwrap());
-        let builder = {
-            #[cfg(not(feature = "depth_rendering_mode"))]
-            {
-                builder.depth_stencil_disabled()
-            }
-            #[cfg(feature = "depth_rendering_mode")]
-            {
-                builder.depth_stencil_simple_depth()
-            }
-        };
-        builder
+            .render_pass(Subpass::from(render_pass, 0).unwrap())
             .fragment_shader(fs_entry, ())
-            .vertex_input_single_buffer()
+            .vertex_input_single_buffer::<EguiVulkanoVertex>()
             .vertex_shader(vs_entry, ())
             .primitive_topology(PrimitiveTopology::TriangleList)
             .front_face_clockwise()
             .polygon_mode_fill()
+            .depth_stencil_disabled()
             .blend_collective(AttachmentBlend {
                 enabled: true,
                 color_op: BlendOp::Add,

@@ -8,19 +8,16 @@ use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, DynamicState, PrimaryAutoCommandBuffer,
     PrimaryCommandBuffer, SubpassContents,
 };
-use vulkano::descriptor::descriptor::{
-    DescriptorBufferDesc, DescriptorDesc, DescriptorDescTy, ShaderStages,
-};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
-use vulkano::pipeline::layout::PipelineLayoutDesc;
+
 use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule,
+    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
 };
-use vulkano::pipeline::vertex::TwoBuffersDefinition;
+use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{
@@ -31,31 +28,30 @@ use vulkano::sync::GpuFuture;
 
 use crate::model;
 use crate::model::{Normal, Vertex};
-
+use vulkano::descriptor_set::layout::{
+    DescriptorBufferDesc, DescriptorDesc, DescriptorDescTy, DescriptorSetDesc,
+};
+use vulkano::descriptor_set::PersistentDescriptorSet;
 // shader interface definition
 
 //pipeline_layout_desc
-fn create_pipeline_layout_desc() -> PipelineLayoutDesc {
-    PipelineLayoutDesc::new(
-        vec![vec![Some(DescriptorDesc {
-            ty: DescriptorDescTy::Buffer(DescriptorBufferDesc {
-                dynamic: None,
-                storage: false,
-            }),
-            array_count: 1,
-            stages: ShaderStages {
-                vertex: true,
-                tessellation_control: false,
-                tessellation_evaluation: false,
-                geometry: false,
-                fragment: false,
-                compute: false,
-            },
-            readonly: true,
-        })]],
-        vec![],
-    )
-    .unwrap()
+fn create_descriptor_set_desc() -> DescriptorSetDesc {
+    DescriptorSetDesc::new(vec![Some(DescriptorDesc {
+        ty: DescriptorDescTy::Buffer(DescriptorBufferDesc {
+            dynamic: None,
+            storage: false,
+        }),
+        array_count: 1,
+        stages: ShaderStages {
+            vertex: true,
+            tessellation_control: false,
+            tessellation_evaluation: false,
+            geometry: false,
+            fragment: false,
+            compute: false,
+        },
+        readonly: true,
+    })])
 }
 
 //render pass
@@ -90,9 +86,7 @@ fn create_renderpass() -> RenderPassDesc {
     RenderPassDesc::new(vec![color, depth], vec![sub_pass_desc], vec![])
 }
 
-fn create_pipeline(
-    device: Arc<Device>,
-) -> Arc<GraphicsPipeline<TwoBuffersDefinition<Vertex, Normal>>> {
+fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline<BuffersDefinition>> {
     let vs = unsafe { ShaderModule::new(device.clone(), include_bytes!("vert.spv")) }.unwrap();
     let fs = unsafe { ShaderModule::new(device.clone(), include_bytes!("frag.spv")) }.unwrap();
     let cstring = CString::new("main").unwrap();
@@ -125,11 +119,12 @@ fn create_pipeline(
             name: Some(Cow::Borrowed("f_color")),
         }])
     };
-    let pipeline_layout_desc = create_pipeline_layout_desc();
+    let descriptor_set_descs = vec![create_descriptor_set_desc()];
     let vs_entry = unsafe {
         vs.graphics_entry_point(
             &cstring,
-            pipeline_layout_desc.clone(),
+            descriptor_set_descs.clone(),
+            None,
             empty_spec_constant,
             vs_in,
             vs_out.clone(),
@@ -139,7 +134,8 @@ fn create_pipeline(
     let fs_entry = unsafe {
         fs.graphics_entry_point(
             &cstring,
-            pipeline_layout_desc.clone(),
+            descriptor_set_descs,
+            None,
             empty_spec_constant,
             vs_out,
             fs_out,
@@ -149,7 +145,11 @@ fn create_pipeline(
     let render_pass = Arc::new(RenderPass::new(device.clone(), create_renderpass()).unwrap());
     Arc::new(
         GraphicsPipeline::start()
-            .vertex_input(TwoBuffersDefinition::<Vertex, Normal>::new())
+            .vertex_input(
+                BuffersDefinition::new()
+                    .vertex::<Vertex>()
+                    .vertex::<Normal>(),
+            )
             .vertex_shader(vs_entry, ())
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
@@ -269,12 +269,7 @@ impl TeapotRenderer {
                 };
                 self.uniform_uploading_buffer_pool.next(data).unwrap()
             };
-            let layout = self
-                .pipeline
-                .layout()
-                .descriptor_set_layout(0)
-                .unwrap()
-                .clone();
+            let layout = self.pipeline.layout().descriptor_set_layouts()[0].clone();
             let set = Arc::new(
                 PersistentDescriptorSet::start(layout)
                     .add_buffer(uniform_buffer_sub_buffer)
@@ -314,7 +309,6 @@ impl TeapotRenderer {
                     self.index_buffer.clone(),
                     set,
                     (),
-                    vec![],
                 )
                 .unwrap()
                 .end_render_pass()

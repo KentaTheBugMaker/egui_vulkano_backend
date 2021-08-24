@@ -23,8 +23,8 @@ use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::command_buffer::{
     CommandBufferUsage, DynamicState, PrimaryAutoCommandBuffer, SubpassContents,
 };
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::descriptor::DescriptorSet;
+use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
+use vulkano::descriptor_set::DescriptorSet;
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 #[cfg(feature = "depth_rendering_mode")]
@@ -33,7 +33,7 @@ use vulkano::image::{
     AttachmentImage, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage,
 };
 use vulkano::memory::pool::StdMemoryPool;
-use vulkano::pipeline::vertex::SingleBufferDefinition;
+use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
@@ -90,7 +90,7 @@ impl ScreenDescriptor {
     }
 }
 
-type Pipeline = GraphicsPipeline<SingleBufferDefinition<EguiVulkanoVertex>>;
+type Pipeline = GraphicsPipeline<BuffersDefinition>;
 struct RenderResource {
     index_buffer: CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>,
     vertex_buffer: CpuBufferPoolChunk<EguiVulkanoVertex, Arc<StdMemoryPool>>,
@@ -106,8 +106,6 @@ pub struct EguiVulkanoRenderPass {
     device: Arc<Device>,
     queue: Arc<Queue>,
     frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-    #[cfg(feature = "depth_rendering_mode")]
-    depth_buffer: Arc<dyn ImageViewAbstract + Send + Sync>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
@@ -162,26 +160,14 @@ impl EguiVulkanoRenderPass {
         let image_staging_buffer =
             CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
         let sampler_desc_set = Arc::new(
-            PersistentDescriptorSet::start(
-                pipeline.layout().descriptor_set_layout(0).unwrap().clone(),
-            )
-            .add_sampler(sampler)
-            .unwrap()
-            .build()
-            .unwrap(),
+            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone())
+                .add_sampler(sampler)
+                .unwrap()
+                .build()
+                .unwrap(),
         ) as Arc<dyn DescriptorSet + Send + Sync>;
         let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
-        #[cfg(feature = "depth_rendering_mode")]
-        let depth_buffer = ImageView::new(
-            AttachmentImage::with_usage(
-                device.clone(),
-                [1, 1],
-                vulkano::format::Format::D32Sfloat,
-                ImageUsage::transient_depth_stencil_attachment(),
-            )
-            .unwrap(),
-        )
-        .unwrap() as Arc<dyn ImageViewAbstract + Send + Sync>;
+
         Self {
             pipeline,
             egui_texture_version: None,
@@ -189,8 +175,6 @@ impl EguiVulkanoRenderPass {
             device,
             queue,
             frame_buffers: vec![],
-            #[cfg(feature = "depth_rendering_mode")]
-            depth_buffer,
             vertex_buffer_pool,
             index_buffer_pool,
             image_staging_buffer,
@@ -206,8 +190,6 @@ impl EguiVulkanoRenderPass {
         &mut self,
         swap_chain_images: &[Arc<SwapchainImage<Wnd>>],
     ) {
-        #[cfg(feature = "depth_rendering_mode")]
-        self.resize_depth_buffer(swap_chain_images[0].dimensions().width_height());
         self.frame_buffers = swap_chain_images
             .iter()
             .map(|image| {
@@ -215,9 +197,6 @@ impl EguiVulkanoRenderPass {
                 let fb = Framebuffer::start(self.pipeline.render_pass().clone())
                     .add(view)
                     .unwrap();
-                #[cfg(feature = "depth_rendering_mode")]
-                let fb = fb.add(self.depth_buffer.clone()).unwrap();
-
                 Arc::new(fb.build().unwrap()) as Arc<dyn FramebufferAbstract + Send + Sync>
             })
             .collect::<Vec<_>>();
@@ -250,13 +229,9 @@ impl EguiVulkanoRenderPass {
     ) -> PrimaryAutoCommandBuffer<StandardCommandPoolAlloc> {
         let framebuffer = match render_target {
             RenderTarget::ColorAttachment(color_attachment) => {
-                #[cfg(feature = "depth_rendering_mode")]
-                self.resize_depth_buffer(color_attachment.image().dimensions().width_height());
                 let fb = Framebuffer::start(self.pipeline.render_pass().clone())
                     .add(color_attachment)
                     .unwrap();
-                #[cfg(feature = "depth_rendering_mode")]
-                let fb = fb.add(self.depth_buffer.clone()).unwrap();
                 Arc::new(fb.build().expect("[BackEnd] failed to create frame buffer"))
             }
             RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
@@ -273,14 +248,7 @@ impl EguiVulkanoRenderPass {
             .expect("[BackEnd] failed to create command buffer builder");
 
         command_buffer_builder
-            .begin_render_pass(
-                framebuffer,
-                SubpassContents::Inline,
-                #[cfg(feature = "depth_rendering_mode")]
-                vec![[0.0, 0.0, 0.0, 0.0].into(), 1.0.into()],
-                #[cfg(not(feature = "depth_rendering_mode"))]
-                vec![[0.0; 4].into()],
-            )
+            .begin_render_pass(framebuffer, SubpassContents::Inline, vec![[0.0; 4].into()])
             .unwrap();
 
         let physical_height = screen_descriptor.physical_height;
@@ -362,21 +330,7 @@ impl EguiVulkanoRenderPass {
                 TextureId::User(_) => IS_USER,
                 _ => IS_EGUI,
             };
-
-            let layer = {
-                #[cfg(feature = "depth_rendering_mode")]
-                {
-                    ((render_resource.job_id as f32 / job_count as f32)
-                        * std::f32::consts::FRAC_PI_2)
-                        .cos()
-                }
-                #[cfg(not(feature = "depth_rendering_mode"))]
-                {
-                    0.0
-                }
-            };
-            #[cfg(feature = "backend_debug")]
-            println!("layer {} z {}", render_resource.job_id, layer);
+            let layer = 0.0;
             let pc = PushConstants {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
                 marker,
@@ -393,22 +347,11 @@ impl EguiVulkanoRenderPass {
                         render_resource.index_buffer,
                         (self.sampler_desc_set.clone(), texture),
                         pc,
-                        vec![],
                     )
                     .unwrap();
             }
         };
-        #[cfg(feature = "depth_rendering_mode")]
-        {
-            let _: Vec<()> = self
-                .render_resource_rx
-                .iter()
-                .take(job_count)
-                .map(draw)
-                .collect();
-        }
 
-        #[cfg(not(feature = "depth_rendering_mode"))]
         {
             /*
                 To avoid image flicker , We sort by job id
@@ -482,13 +425,11 @@ impl EguiVulkanoRenderPass {
         image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
     ) -> Arc<dyn DescriptorSet + Send + Sync> {
         Arc::new(
-            PersistentDescriptorSet::start(
-                pipeline.layout().descriptor_set_layout(1).unwrap().clone(),
-            )
-            .add_image(image_view)
-            .unwrap()
-            .build()
-            .unwrap(),
+            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[1].clone())
+                .add_image(image_view)
+                .unwrap()
+                .build()
+                .unwrap(),
         )
     }
     #[inline(always)]
@@ -645,21 +586,7 @@ impl EguiVulkanoRenderPass {
             Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
         }
     }
-    #[cfg(feature = "depth_rendering_mode")]
-    fn resize_depth_buffer(&mut self, dimensions: [u32; 2]) {
-        if self.depth_buffer.image().dimensions().width_height() != dimensions {
-            self.depth_buffer = ImageView::new(
-                AttachmentImage::with_usage(
-                    self.device.clone(),
-                    dimensions,
-                    vulkano::format::Format::D32Sfloat,
-                    ImageUsage::transient_depth_stencil_attachment(),
-                )
-                .unwrap(),
-            )
-            .unwrap() as Arc<dyn ImageViewAbstract + Send + Sync>;
-        }
-    }
+
     ///  recreate vulkano texture.
     ///
     ///  usable for render target resize.

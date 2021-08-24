@@ -5,7 +5,7 @@ use egui::FontDefinitions;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
-use vulkano::instance::{Instance, PhysicalDevice};
+use vulkano::instance::Instance;
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use vulkano::{swapchain, Version};
@@ -17,6 +17,7 @@ use winit::window::WindowBuilder;
 use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
 
 use crate::renderer::TeapotRenderer;
+use vulkano::device::physical::PhysicalDevice;
 
 mod model;
 mod renderer;
@@ -40,8 +41,8 @@ fn main() {
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     println!(
         "Using device: {} (type: {:?})",
-        physical.properties().device_name.as_ref().unwrap(),
-        physical.properties().device_type.as_ref().unwrap()
+        physical.properties().device_name,
+        physical.properties().device_type
     );
 
     let event_loop: EventLoop<()> = EventLoop::with_user_event();
