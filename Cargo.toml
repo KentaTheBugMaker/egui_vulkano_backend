@@ -14,15 +14,15 @@ readme = "README.md"
 backend_debug = []
 [dependencies]
 vulkano = "^0.25"
-epi = "0.13"
+epi = "0.14"
 threadpool="1"
 num_cpus="1"
 [dev-dependencies]
-egui_winit_platform = "0.9"
-egui = "0.13"
-epi = "0.13"
+egui_winit_platform = "0.10"
+egui = "0.14"
+epi = "0.14"
 winit = "0.25"
-egui_demo_lib = { version = "0.13", features = ["syntect"] }
+egui_demo_lib = { version = "0.14", features = ["syntect"] }
 vulkano-win = "^0.25"
 cgmath = "0.18"
 chrono = "0.4"

@@ -31,8 +31,8 @@ cargo run --example demo
 
 None
 
-## Update v0.13.0
-* target egui 0.13. + vulkano 0.25
+## Update v0.14.0
+* target egui 0.14. + vulkano 0.25
 * remove wait_image_upload
 * demo change
 
@@ -112,7 +112,8 @@ None
 |0.4.1|0.12.0|0.23.0|none|removed|
 |0.5.0|0.12.0|0.24.0|none|removed|
 |0.5.0|0.13|0.24|none|removed|
-
+|0.6.0|0.13|0.24|none|removed|
+|0.14.0|0.14.0|0.25.0|none|removed|
 ## License
 
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
