@@ -202,7 +202,7 @@ fn main() {
                     })
                 });
                 // End the UI frame. We could now handle the output and draw the UI with the backend.
-                let (_output, paint_commands) = platform.end_frame();
+                let (_output, paint_commands) = platform.end_frame(None);
                 let paint_jobs = platform.context().tessellate(paint_commands);
 
                 let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());

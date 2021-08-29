@@ -207,7 +207,7 @@ fn main() {
                         .collect();
                 });
                 // End the UI frame. We could now handle the output and draw the UI with the backend.
-                let (output, paint_commands) = platform.end_frame();
+                let (output, paint_commands) = platform.end_frame(None);
                 let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
                 previous_frame_time = Some(frame_time);
                 if output.needs_repaint {
