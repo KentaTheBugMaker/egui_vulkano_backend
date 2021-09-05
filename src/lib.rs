@@ -46,10 +46,11 @@ mod render_pass;
 mod shader;
 /*
 same layout as egui
+so we can cast from Vertex and send it to GPU directly
 memory layout is specified by Vertex trait
 rust's orphan rule we can't use egui::Vertex directly ie . we can't do this
 vulkano::impl_vertex!(egui::epaint::Vertex,pos,uv,color);
-so we can cast from Vertex and send it to GPU directly
+
 */
 #[repr(C)]
 #[derive(Default, Debug, Copy, Clone)]
@@ -58,7 +59,7 @@ struct EguiVulkanoVertex {
     a_tex_coord: [f32; 2],
     a_color: u32,
 }
-
+#[repr(C)]
 struct IsEguiTextureMarker(u32);
 
 const IS_EGUI: IsEguiTextureMarker = IsEguiTextureMarker(1);
@@ -333,7 +334,6 @@ impl EguiVulkanoRenderPass {
             let pc = PushConstants {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
                 marker,
-
             };
             {
                 #[cfg(feature = "backend_debug")]
