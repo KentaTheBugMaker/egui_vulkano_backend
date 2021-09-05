@@ -68,7 +68,6 @@ const IS_USER: IsEguiTextureMarker = IsEguiTextureMarker(0);
 struct PushConstants {
     u_screen_size: [f32; 2],
     marker: IsEguiTextureMarker,
-    layer: f32,
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 /// same as [egui_wgpu_backend::ScreenDescriptor](https://docs.rs/egui_wgpu_backend/0.8.0/egui_wgpu_backend/struct.ScreenDescriptor.html)
@@ -330,11 +329,11 @@ impl EguiVulkanoRenderPass {
                 TextureId::User(_) => IS_USER,
                 _ => IS_EGUI,
             };
-            let layer = 0.0;
+
             let pc = PushConstants {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
                 marker,
-                layer,
+
             };
             {
                 #[cfg(feature = "backend_debug")]

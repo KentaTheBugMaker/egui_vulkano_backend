@@ -4,7 +4,6 @@
 layout(push_constant) uniform UniformBuffer {
     vec2 u_screen_size;
     bool is_egui_system_texture;
-    float layer;
 };
 
 layout(location = 0) in vec2 a_pos;//R32G32SFloat
@@ -25,6 +24,6 @@ void main() {
     // [u8; 4] SRGB as u32 -> [r, g, b, a]
     vec4 color = vec4(a_color & 0xFFu, (a_color >> 8) & 0xFFu, (a_color >> 16) & 0xFFu, (a_color >> 24) & 0xFFu);
     v_color = vec4(linear_from_srgb(color.rgb), color.a / 255.0);
-    gl_Position=vec4(2.0*((a_pos.x/u_screen_size.x)-0.5), 2.0*((a_pos.y/u_screen_size.y)-0.5), layer, 1.0);
+    gl_Position=vec4(2.0*((a_pos.x/u_screen_size.x)-0.5), 2.0*((a_pos.y/u_screen_size.y)-0.5), 0.0, 1.0);
 
 }
