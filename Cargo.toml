@@ -14,15 +14,16 @@ readme = "README.md"
 backend_debug = []
 [dependencies]
 vulkano = "^0.25"
-epi = "0.14"
+epi = {git="https://github.com/emilk/egui.git" , branch="egui_for_winit"}
 threadpool="1"
 num_cpus="1"
-[dev-dependencies]
-egui_winit_platform = "0.10"
-egui = "0.14"
-epi = "0.14"
 winit = "0.25"
-egui_demo_lib = { version = "0.14", features = ["syntect"] }
+egui_for_winit = {git="https://github.com/emilk/egui.git" , branch="egui_for_winit"}
+[dev-dependencies]
+
+egui = {git="https://github.com/emilk/egui.git" , branch="egui_for_winit"}
+once_cell = "1.8"
+egui_demo_lib = { git="https://github.com/emilk/egui.git" , branch="egui_for_winit", features = ["syntect"] }
 vulkano-win = "^0.25"
 cgmath = "0.18"
 chrono = "0.4"

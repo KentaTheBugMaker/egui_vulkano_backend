@@ -91,11 +91,8 @@ fn main() {
     };
 
     //create renderer
-    let mut egui_render_pass = egui_vulkano_backend::EguiVulkanoRenderPass::new(
-        device.clone(),
-        queue.clone(),
-        swapchain.format(),
-    );
+    let mut egui_render_pass =
+        egui_vulkano_backend::Painter::new(device.clone(), queue.clone(), swapchain.format());
     egui_render_pass.create_frame_buffers(images.as_slice());
     //init egui
     // create relation between TextureID and render target

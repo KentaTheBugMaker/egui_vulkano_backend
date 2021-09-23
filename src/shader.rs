@@ -11,8 +11,8 @@ use vulkano::pipeline::shader::{
 };
 use vulkano::render_pass::{RenderPass, Subpass};
 
+use crate::painter::{EguiVulkanoVertex, Pipeline, PushConstants};
 use crate::render_pass::render_pass_desc_from_format;
-use crate::{EguiVulkanoVertex, Pipeline, PushConstants};
 use vulkano::descriptor_set::layout::{
     DescriptorDesc, DescriptorDescTy, DescriptorImageDesc, DescriptorImageDescArray,
     DescriptorImageDescDimensions, DescriptorSetDesc,

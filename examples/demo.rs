@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chrono::Timelike;
-use egui::{ClippedMesh, FontDefinitions};
-use egui_winit_platform::{Platform, PlatformDescriptor};
+use egui::ClippedMesh;
+
 use epi::App;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
@@ -18,53 +18,27 @@ use winit::event_loop::ControlFlow::{Poll, Wait};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
+use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget, ScreenDescriptor};
+use std::borrow::Borrow;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
-
-/// A custom event type for the winit app.
-enum EguiEvent {
-    RequestRedraw,
-}
-
-/// This is the repaint signal type that egui needs for requesting a repaint from another thread.
-/// It sends the custom RequestRedraw event to the winit event loop.
-struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<EguiEvent>>);
-
-impl epi::RepaintSignal for ExampleRepaintSignal {
-    fn request_repaint(&self) {
-        self.0
-            .lock()
-            .unwrap()
-            .send_event(EguiEvent::RequestRedraw)
-            .ok();
-    }
-}
+use once_cell::sync::{Lazy, OnceCell};
 
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
     // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
-    let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
-    let physical_properties = physical.properties().clone();
-    let gpu_name = physical_properties.device_name;
-    let gpu_type = physical_properties.device_type;
-    let heap_infos: Vec<String> = physical
-        .memory_heaps()
-        .map(|heap| {
-            format!(
-                "Bytes : {}\nDevice local : {} \nMulti instance : {} \n",
-                heap.size(),
-                heap.is_device_local(),
-                heap.is_multi_instance()
-            )
-        })
-        .collect();
-    let event_loop = EventLoop::with_user_event();
+    //let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
+    static instance:OnceCell<Arc<Instance>>=OnceCell::new();
+    instance.set(Instance::new(None,Version::V1_0,&required_extensions,None).unwrap()).unwrap();
+    let physical = PhysicalDevice::enumerate(instance.get().unwrap()).next().unwrap();
+
+    let event_loop: EventLoop<()> = EventLoop::with_user_event();
+    //create surface
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
-        .build_vk_surface(&event_loop, instance.clone())
+        .build_vk_surface(&event_loop, (instance.get().unwrap().clone()))
         .unwrap();
 
     let queue_family = physical
@@ -105,51 +79,15 @@ fn main() {
             .build()
             .unwrap()
     };
+    //create integration
+    let mut egui = EguiVulkanoBackend::new(
+        surface.clone(),
+        device.clone(),
+        queue.clone(),
+        swapchain.format(),
+    );
 
-    //create renderer
-    let mut egui_render_pass =
-        egui_vulkano_backend::EguiVulkanoRenderPass::new(device.clone(), queue, swapchain.format());
-    // initialize framebuffer
-    egui_render_pass.create_frame_buffers(&images);
-    //init egui
-    let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
-        event_loop.create_proxy(),
-    )));
-
-    // We use the egui_winit_platform crate as the platform.
-    let mut platform = Platform::new(PlatformDescriptor {
-        physical_width: swapchain.dimensions()[0],
-        physical_height: swapchain.dimensions()[1],
-        scale_factor: surface.window().scale_factor(),
-        font_definitions: FontDefinitions::default(),
-        style: Default::default(),
-    });
-
-    // Display the demo application that ships with egui.
-    let mut demo_app = egui_demo_lib::WrapApp::default();
-
-    let start_time = Instant::now();
-    let mut previous_frame_time = None;
-    /*
-    tessellating thread
-    */
-
-    let (work_tx, work_rx): (
-        Sender<Box<dyn FnOnce() -> Vec<ClippedMesh> + Send + Sync>>,
-        Receiver<Box<dyn FnOnce() -> Vec<ClippedMesh> + Send + Sync>>,
-    ) = std::sync::mpsc::channel();
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-
-    let shared_sender = Arc::new(Mutex::new(work_tx));
-    std::thread::spawn(move || {
-        for work in work_rx.iter() {
-            let result: Vec<ClippedMesh> = work();
-            result_tx.send(result).unwrap();
-        }
-    });
     event_loop.run(move |event, _, control_flow| {
-        // Pass the winit events to the platform integration.
-        platform.handle_event(&event);
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -169,66 +107,44 @@ fn main() {
                         Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                     };
                 swapchain = new_swapchain;
-                egui_render_pass.create_frame_buffers(&new_images);
+                egui.resize_frame_buffers(&new_images);
             }
             Event::RedrawEventsCleared => {
-                platform.update_time(start_time.elapsed().as_secs_f64());
 
-                // Begin to draw the UI frame.
-                let egui_start = Instant::now();
-                platform.begin_frame();
-                let mut app_output = epi::backend::AppOutput::default();
+                egui.begin_frame(surface.clone());
 
-                let mut frame = epi::backend::FrameBuilder {
-                    info: epi::IntegrationInfo {
-                        web_info: None,
-                        prefer_dark_mode: None,
-                        cpu_usage: previous_frame_time,
-                        seconds_since_midnight: Some(seconds_since_midnight()),
-                        native_pixels_per_point: Some(surface.window().scale_factor() as _),
-                    },
-                    tex_allocator: &mut egui_render_pass,
-                    output: &mut app_output,
-                    repaint_signal: repaint_signal.clone(),
-                }
-                .build();
+                let mut quit = false;
 
-                // Draw the demo application.
-                demo_app.update(&platform.context(), &mut frame);
-                egui::Window::new("Your Hardware").show(&platform.context(), |ui| {
-                    ui.label(format!("GPU type : {:?}", gpu_type));
-                    ui.label(format!("GPU name : {}", gpu_name));
-                    ui.label("Heaps");
-                    let _: Vec<()> = heap_infos
-                        .iter()
-                        .map(|info| {
-                            ui.label(info);
-                        })
-                        .collect();
+                egui::SidePanel::left("my_side_panel").show(egui.ctx(), |ui| {
+                    ui.heading("Hello World!");
+                    if ui.button("Quit").clicked() {
+                        quit = true;
+                    }
+
+                    egui::ComboBox::from_label("Version")
+                        .width(150.0)
+                        .selected_text("foo")
+                        .show_ui(ui, |ui| {
+                            egui::CollapsingHeader::new("Dev")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.label("contents");
+                                });
+                        });
                 });
-                // End the UI frame. We could now handle the output and draw the UI with the backend.
-                let (output, paint_commands) = platform.end_frame(None);
-                let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
-                previous_frame_time = Some(frame_time);
-                if output.needs_repaint {
-                    *control_flow = Poll;
+
+                let (needs_repaint, shapes) = egui.end_frame(surface.clone());
+
+                *control_flow = if quit {
+                    winit::event_loop::ControlFlow::Exit
+                } else if needs_repaint {
+                    surface.window().request_redraw();
+                    winit::event_loop::ControlFlow::Poll
                 } else {
-                    *control_flow = Wait;
-                }
-                println!("number of shapes : {}", paint_commands.len());
-                let tess_start = Instant::now();
+                    winit::event_loop::ControlFlow::Wait
+                };
 
-                let ctx = platform.context().clone();
-                shared_sender
-                    .lock()
-                    .unwrap()
-                    .send(Box::new(move || ctx.tessellate(paint_commands))
-                        as Box<dyn FnOnce() -> Vec<ClippedMesh> + Send + Sync>)
-                    .unwrap();
-                println!("send to tessellator");
-                if let Ok(paint_jobs) = result_rx.recv() {
-                    println!("Tessellating time : {:?} ", tess_start.elapsed());
-
+                {
                     let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
                     previous_frame_end.as_mut().unwrap().cleanup_finished();
 
@@ -245,21 +161,24 @@ fn main() {
                         return;
                     }
 
-                    let screen_descriptor = ScreenDescriptor {
-                        physical_width: surface.window().inner_size().width,
-                        physical_height: surface.window().inner_size().height,
-                        scale_factor: surface.window().scale_factor() as f32,
-                    };
-                    egui_render_pass.request_upload_egui_texture(&platform.context().texture());
-
                     let render_target = RenderTarget::FrameBufferIndex(image_num);
-                    let render_command = egui_render_pass.create_command_buffer(
-                        render_target,
-                        paint_jobs,
-                        &screen_descriptor,
-                    );
 
-                    egui_render_pass.present_to_screen(render_command, acquire_future);
+                    let mut render_command = AutoCommandBufferBuilder::primary(
+                        device.clone(),
+                        queue_family,
+                        CommandBufferUsage::OneTimeSubmit,
+                    )
+                    .unwrap();
+
+                    //before egui draw
+
+                    //add egui draw call for command buffer builder
+                    egui.paint(render_target, &mut render_command, shapes);
+
+                    //after egui draw
+
+                    egui.painter_mut()
+                        .present_to_screen(render_command.build().unwrap(), acquire_future);
                 }
             }
             _ => (),
