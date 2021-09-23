@@ -6,10 +6,9 @@
 //! * lower memory usage
 //! * parallel data uploading
 //crate import
-use egui_for_winit;
+
 use epi::egui;
-use vulkano;
-use winit;
+
 //egui
 use egui::Color32;
 use egui::TextureId;
@@ -157,7 +156,7 @@ impl EguiVulkanoBackend {
             &screen_desc,
         )
     }
-    pub fn resize_frame_buffers(
+    pub fn create_frame_buffers(
         &mut self,
         swap_chain_images: &[Arc<SwapchainImage<winit::window::Window>>],
     ) {

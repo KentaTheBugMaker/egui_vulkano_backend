@@ -1,11 +1,7 @@
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::Arc;
 
 use chrono::Timelike;
-use egui::ClippedMesh;
 
-use epi::App;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
 use vulkano::instance::Instance;
@@ -13,16 +9,15 @@ use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::ControlFlow::{Poll, Wait};
-use winit::event_loop::{ControlFlow, EventLoop};
+
+use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget, ScreenDescriptor};
-use std::borrow::Borrow;
+use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget};
+
+use once_cell::sync::OnceCell;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
-use once_cell::sync::{Lazy, OnceCell};
 
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
@@ -30,15 +25,19 @@ fn main() {
 
     let required_extensions = vulkano_win::required_extensions();
     //let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
-    static instance:OnceCell<Arc<Instance>>=OnceCell::new();
-    instance.set(Instance::new(None,Version::V1_0,&required_extensions,None).unwrap()).unwrap();
-    let physical = PhysicalDevice::enumerate(instance.get().unwrap()).next().unwrap();
+    static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
+    INSTANCE
+        .set(Instance::new(None, Version::V1_0, &required_extensions, None).unwrap())
+        .unwrap();
+    let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
+        .next()
+        .unwrap();
 
     let event_loop: EventLoop<()> = EventLoop::with_user_event();
     //create surface
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
-        .build_vk_surface(&event_loop, (instance.get().unwrap().clone()))
+        .build_vk_surface(&event_loop, INSTANCE.get().unwrap().clone())
         .unwrap();
 
     let queue_family = physical
@@ -86,17 +85,88 @@ fn main() {
         queue.clone(),
         swapchain.format(),
     );
-
+    egui.create_frame_buffers(&images);
     event_loop.run(move |event, _, control_flow| {
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
+        let mut redraw = || {
+            egui.begin_frame(surface.clone());
+
+            let mut quit = false;
+
+            egui::SidePanel::left("my_side_panel").show(egui.ctx(), |ui| {
+                ui.heading("Hello World!");
+                if ui.button("Quit").clicked() {
+                    quit = true;
+                }
+
+                egui::ComboBox::from_label("Version")
+                    .width(150.0)
+                    .selected_text("foo")
+                    .show_ui(ui, |ui| {
+                        egui::CollapsingHeader::new("Dev")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                ui.label("contents");
+                            });
+                    });
+            });
+
+            let (needs_repaint, shapes) = egui.end_frame(surface.clone());
+
+            *control_flow = if quit {
+                winit::event_loop::ControlFlow::Exit
+            } else if needs_repaint {
+                surface.window().request_redraw();
+                winit::event_loop::ControlFlow::Poll
+            } else {
+                winit::event_loop::ControlFlow::Wait
+            };
+
+            {
+                let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
+                previous_frame_end.as_mut().unwrap().cleanup_finished();
+
+                let (image_num, suboptimal, acquire_future) =
+                    match swapchain::acquire_next_image(swapchain.clone(), None) {
+                        Ok(r) => r,
+                        Err(AcquireError::OutOfDate) => {
+                            return;
+                        }
+                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                    };
+
+                if suboptimal {
+                    return;
+                }
+
+                let render_target = RenderTarget::FrameBufferIndex(image_num);
+
+                let mut render_command = AutoCommandBufferBuilder::primary(
+                    device.clone(),
+                    queue_family,
+                    CommandBufferUsage::OneTimeSubmit,
+                )
+                .unwrap();
+
+                //before egui draw
+
+                //add egui draw call for command buffer builder
+                egui.paint(render_target, &mut render_command, shapes);
+
+                //after egui draw
+
+                egui.painter_mut()
+                    .present_to_screen(render_command.build().unwrap(), acquire_future);
             }
-            Event::WindowEvent {
-                event: WindowEvent::Resized(size),
+        };
+        match event {
+            // Platform-dependent event handlers to workaround a winit bug
+            // See: https://github.com/rust-windowing/winit/issues/987
+            // See: https://github.com/rust-windowing/winit/issues/1619
+            winit::event::Event::RedrawEventsCleared if cfg!(windows) => redraw(),
+            winit::event::Event::RedrawRequested(_) if !cfg!(windows) => redraw(),
+
+            winit::event::Event::WindowEvent {
+                event: winit::event::WindowEvent::Resized(size),
                 ..
             } => {
                 let dimensions: [u32; 2] = size.into();
@@ -107,80 +177,18 @@ fn main() {
                         Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                     };
                 swapchain = new_swapchain;
-                egui.resize_frame_buffers(&new_images);
+                egui.create_frame_buffers(&new_images);
             }
-            Event::RedrawEventsCleared => {
-
-                egui.begin_frame(surface.clone());
-
-                let mut quit = false;
-
-                egui::SidePanel::left("my_side_panel").show(egui.ctx(), |ui| {
-                    ui.heading("Hello World!");
-                    if ui.button("Quit").clicked() {
-                        quit = true;
-                    }
-
-                    egui::ComboBox::from_label("Version")
-                        .width(150.0)
-                        .selected_text("foo")
-                        .show_ui(ui, |ui| {
-                            egui::CollapsingHeader::new("Dev")
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    ui.label("contents");
-                                });
-                        });
-                });
-
-                let (needs_repaint, shapes) = egui.end_frame(surface.clone());
-
-                *control_flow = if quit {
-                    winit::event_loop::ControlFlow::Exit
-                } else if needs_repaint {
-                    surface.window().request_redraw();
-                    winit::event_loop::ControlFlow::Poll
-                } else {
-                    winit::event_loop::ControlFlow::Wait
-                };
-
-                {
-                    let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
-                    previous_frame_end.as_mut().unwrap().cleanup_finished();
-
-                    let (image_num, suboptimal, acquire_future) =
-                        match swapchain::acquire_next_image(swapchain.clone(), None) {
-                            Ok(r) => r,
-                            Err(AcquireError::OutOfDate) => {
-                                return;
-                            }
-                            Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                        };
-
-                    if suboptimal {
-                        return;
-                    }
-
-                    let render_target = RenderTarget::FrameBufferIndex(image_num);
-
-                    let mut render_command = AutoCommandBufferBuilder::primary(
-                        device.clone(),
-                        queue_family,
-                        CommandBufferUsage::OneTimeSubmit,
-                    )
-                    .unwrap();
-
-                    //before egui draw
-
-                    //add egui draw call for command buffer builder
-                    egui.paint(render_target, &mut render_command, shapes);
-
-                    //after egui draw
-
-                    egui.painter_mut()
-                        .present_to_screen(render_command.build().unwrap(), acquire_future);
+            winit::event::Event::WindowEvent { event, .. } => {
+                if egui.is_quit_event(&event) {
+                    *control_flow = winit::event_loop::ControlFlow::Exit;
                 }
+
+                egui.on_event(&event);
+
+                surface.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
+
             _ => (),
         }
     });
