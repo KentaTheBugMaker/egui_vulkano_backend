@@ -82,7 +82,7 @@ fn main() {
     let mut egui = EguiVulkanoBackend::new(
         surface.clone(),
         device.clone(),
-        queue.clone(),
+        queue,
         swapchain.format(),
     );
     egui.create_frame_buffers(&images);
