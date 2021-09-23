@@ -1,22 +1,22 @@
-use std::borrow::Borrow;
-use std::time::Instant;
+use egui::TextureId;
 
-use egui::FontDefinitions;
-use egui_winit_platform::{Platform, PlatformDescriptor};
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::image::ImageUsage;
+use vulkano::image::{AttachmentImage, ImageUsage};
 use vulkano::instance::Instance;
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::{RenderTarget, ScreenDescriptor};
+use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget, ScreenDescriptor};
 
 use crate::renderer::TeapotRenderer;
+use once_cell::sync::OnceCell;
+use std::sync::Arc;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
 
 mod model;
@@ -27,18 +27,13 @@ fn main() {
     // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(
-        None,
-        Version {
-            major: 1,
-            minor: 2,
-            patch: 0,
-        },
-        &required_extensions,
-        None,
-    )
-    .unwrap();
-    let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
+    static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
+    INSTANCE
+        .set(Instance::new(None, Version::V1_0, &required_extensions, None).unwrap())
+        .unwrap();
+    let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
+        .next()
+        .unwrap();
     println!(
         "Using device: {} (type: {:?})",
         physical.properties().device_name,
@@ -48,7 +43,7 @@ fn main() {
     let event_loop: EventLoop<()> = EventLoop::with_user_event();
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
-        .build_vk_surface(&event_loop, instance.clone())
+        .build_vk_surface(&event_loop, INSTANCE.get().unwrap().clone())
         .unwrap();
 
     let queue_family = physical
@@ -90,25 +85,22 @@ fn main() {
             .unwrap()
     };
 
-    //create renderer
-    let mut egui_render_pass =
-        egui_vulkano_backend::Painter::new(device.clone(), queue.clone(), swapchain.format());
-    egui_render_pass.create_frame_buffers(images.as_slice());
+    let mut egui = EguiVulkanoBackend::new(
+        surface.clone(),
+        device.clone(),
+        queue.clone(),
+        swapchain.format(),
+    );
+
+    egui.create_frame_buffers(images.as_slice());
     //init egui
     // create relation between TextureID and render target
-    let (texture_id, mut render_target) = egui_render_pass
+    let (texture_id, mut render_target) = egui
+        .painter_mut()
         .init_vulkano_image_with_dimensions([1280, 720])
         .unwrap();
     let size = surface.window().inner_size();
-    // We use the egui_winit_platform crate as the platform.
-    let mut platform = Platform::new(PlatformDescriptor {
-        physical_width: size.width,
-        physical_height: size.height,
-        scale_factor: surface.window().scale_factor(),
-        font_definitions: FontDefinitions::default(),
-        style: Default::default(),
-    });
-    let start_time = Instant::now();
+
     //create renderer
     let mut teapot_renderer = TeapotRenderer::new(device.clone(), queue);
     //set render target
@@ -121,16 +113,87 @@ fn main() {
     let mut rotate = 0.0;
     let mut height_percent = 0.7;
     let mut image_size = [size.width as f32, size.height as f32 * height_percent];
+    let mut needs_to_resize_teapot_rt = false;
     event_loop.run(move |event, _, control_flow| {
-        // Pass the winit events to the platform integration.
-        platform.handle_event(&event);
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
+        let mut redraw = || {
+            // Begin to draw the UI frame.
+
+            egui.begin_frame(surface.clone());
+
+            egui::CentralPanel::default().show(egui.ctx(), |ui| {
+                ui.vertical(|ui| {
+                    ui.image(texture_id, image_size);
+                    ui.horizontal(|ui| {
+                        //add Model view adjuster
+                        if ui
+                            .add(egui::widgets::Slider::new(&mut height_percent, 0.1..=0.9))
+                            .changed()
+                        {
+                            needs_to_resize_teapot_rt = true;
+                        }
+                        //add rotation control
+                        if ui
+                            .add(egui::Slider::new(
+                                &mut rotate,
+                                -std::f32::consts::PI..=std::f32::consts::PI,
+                            ))
+                            .changed()
+                        {
+                            teapot_renderer.set_rotate(rotate)
+                        }
+                    });
+                })
+            });
+            // End the UI frame. We could now handle the output and draw the UI with the backend.
+            let (needs_repaint, shapes) = egui.end_frame(surface.clone());
+            if needs_repaint {
+                surface.window().request_redraw();
+                winit::event_loop::ControlFlow::Poll
+            } else {
+                winit::event_loop::ControlFlow::Wait
+            };
+
+            let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
+            previous_frame_end.as_mut().unwrap().cleanup_finished();
+
+            let (image_num, suboptimal, acquire_future) =
+                match swapchain::acquire_next_image(swapchain.clone(), None) {
+                    Ok(r) => r,
+                    Err(AcquireError::OutOfDate) => {
+                        return;
+                    }
+                    Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                };
+
+            if suboptimal {
+                return;
             }
+            if needs_to_resize_teapot_rt {
+                needs_to_resize_teapot_rt = false;
+                let size = surface.window().inner_size();
+                image_size = [size.width as f32, size.height as f32 * height_percent];
+                render_target =
+                    teapot_rt_resize(size.into(), texture_id, height_percent, egui.painter_mut());
+                teapot_renderer.set_render_target(render_target.clone());
+            }
+            teapot_renderer.draw();
+
+            let render_target = RenderTarget::FrameBufferIndex(image_num);
+            let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
+                device.clone(),
+                queue_family,
+                CommandBufferUsage::OneTimeSubmit,
+            )
+            .unwrap();
+
+            egui.paint(render_target, &mut command_buffer_builder, shapes);
+            egui.painter_mut()
+                .present_to_screen(command_buffer_builder.build().unwrap(), acquire_future);
+        };
+
+        match event {
+            winit::event::Event::RedrawEventsCleared if cfg!(windows) => redraw(),
+            winit::event::Event::RedrawRequested(_) if !cfg!(windows) => redraw(),
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
                 ..
@@ -138,99 +201,43 @@ fn main() {
                 match swapchain.recreate().dimensions(size.into()).build() {
                     Ok(r) => {
                         swapchain = r.0;
-                        egui_render_pass.create_frame_buffers(&r.1);
+                        egui.create_frame_buffers(&r.1);
                     }
                     Err(SwapchainCreationError::UnsupportedDimensions) => return,
                     Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                 }
                 //resize render_target
-                render_target = egui_render_pass
-                    .recreate_vulkano_texture_with_dimensions(
-                        texture_id,
-                        [size.width, (size.height as f32 * height_percent) as u32],
-                    )
-                    .unwrap();
-                image_size = [size.width as f32, size.height as f32 * height_percent];
-                //reset framebuffer
-                teapot_renderer.set_render_target(render_target.clone());
+                needs_to_resize_teapot_rt = true;
                 //set screen descriptor
                 screen_descriptor.physical_height = size.height;
                 screen_descriptor.physical_width = size.width;
             }
-            Event::RedrawEventsCleared => {
-                platform.update_time(start_time.elapsed().as_secs_f64());
 
-                // Begin to draw the UI frame.
-
-                platform.begin_frame();
-
-                egui::CentralPanel::default().show(platform.context().borrow(), |ui| {
-                    ui.vertical(|ui| {
-                        ui.image(texture_id, image_size);
-                        ui.horizontal(|ui| {
-                            //add Model view adjuster
-                            if ui
-                                .add(egui::widgets::Slider::new(&mut height_percent, 0.1..=0.9))
-                                .changed()
-                            {
-                                let size = surface.window().inner_size();
-
-                                render_target = egui_render_pass
-                                    .recreate_vulkano_texture_with_dimensions(
-                                        texture_id,
-                                        [size.width, (size.height as f32 * height_percent) as u32],
-                                    )
-                                    .unwrap();
-                                teapot_renderer.set_render_target(render_target.clone());
-                                image_size =
-                                    [size.width as f32, size.height as f32 * height_percent];
-                            }
-                            //add rotation control
-                            if ui
-                                .add(egui::Slider::new(
-                                    &mut rotate,
-                                    -std::f32::consts::PI..=std::f32::consts::PI,
-                                ))
-                                .changed()
-                            {
-                                teapot_renderer.set_rotate(rotate)
-                            }
-                        });
-                    })
-                });
-                // End the UI frame. We could now handle the output and draw the UI with the backend.
-                let (_output, paint_commands) = platform.end_frame(None);
-                let paint_jobs = platform.context().tessellate(paint_commands);
-
-                let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
-                previous_frame_end.as_mut().unwrap().cleanup_finished();
-
-                let (image_num, suboptimal, acquire_future) =
-                    match swapchain::acquire_next_image(swapchain.clone(), None) {
-                        Ok(r) => r,
-                        Err(AcquireError::OutOfDate) => {
-                            return;
-                        }
-                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                    };
-
-                if suboptimal {
-                    return;
+            winit::event::Event::WindowEvent { event, .. } => {
+                if egui.is_quit_event(&event) {
+                    *control_flow = winit::event_loop::ControlFlow::Exit;
                 }
-                teapot_renderer.draw();
-                egui_render_pass.request_upload_egui_texture(&platform.context().texture());
 
-                let render_target = RenderTarget::FrameBufferIndex(image_num);
-                let render_command = egui_render_pass.create_command_buffer(
-                    render_target,
-                    paint_jobs,
-                    &screen_descriptor,
-                );
+                egui.on_event(&event);
 
-                egui_render_pass.present_to_screen(render_command, acquire_future);
-                *control_flow = ControlFlow::Poll
+                surface.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
+
             _ => (),
         }
     });
+}
+
+fn teapot_rt_resize(
+    size: [u32; 2],
+    texture_id: TextureId,
+    height_percent: f32,
+    painter: &mut egui_vulkano_backend::painter::Painter,
+) -> Arc<AttachmentImage> {
+    painter
+        .recreate_vulkano_texture_with_dimensions(
+            texture_id,
+            [size[0], (size[1] as f32 * height_percent) as u32],
+        )
+        .unwrap()
 }
