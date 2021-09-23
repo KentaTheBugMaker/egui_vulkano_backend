@@ -589,7 +589,23 @@ impl Painter {
         }
     }
 }
+impl epi::NativeTexture for Painter {
+    type Texture = Arc<dyn ImageViewAbstract + Send + Sync>;
 
+    fn register_native_texture(&mut self, native: Self::Texture) -> TextureId {
+        self.register_vulkano_image_view(native)
+    }
+
+    fn replace_native_texture(&mut self, id: TextureId, replacing: Self::Texture) {
+        if let egui::TextureId::User(x) = id {
+            self.egui_textures
+                .get_mut(&Some(x))
+                .replace(&mut Some(TextureDescriptor(
+                    Self::create_descriptor_set_from_view(self.pipeline.clone(), replacing),
+                )));
+        }
+    }
+}
 impl epi::TextureAllocator for Painter {
     fn alloc_srgba_premultiplied(
         &mut self,

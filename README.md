@@ -9,8 +9,6 @@
 
 Backend code to run [egui](https://crates.io/crates/egui) using [vulkano](https://crates.io/crates/vulkano).
 
-this crate rendering only you need I/O egui integration
-e.g. [egui_winit_platform](https://crates.io/crates/egui_winit_platform)
 
 ## sample
 
@@ -30,7 +28,10 @@ cargo run --example demo
 ## known bug
 
 None
-
+## Released
+* target egui future release + vulkano 0.25
+* demo changed
+* use official integration `egui_for_winit` like `egui_glium` does
 ## Update v0.14.0
 * target egui 0.14. + vulkano 0.25
 * remove wait_image_upload

@@ -15,9 +15,23 @@ use winit::window::WindowBuilder;
 
 use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget};
 
+use epi::{App, IntegrationInfo};
 use once_cell::sync::OnceCell;
+use std::time::Instant;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
+
+enum Event {
+    RequestRedraw,
+}
+
+struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<Event>>);
+
+impl epi::RepaintSignal for ExampleRepaintSignal {
+    fn request_repaint(&self) {
+        self.0.lock().unwrap().send_event(Event::RequestRedraw).ok();
+    }
+}
 
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
@@ -33,7 +47,7 @@ fn main() {
         .next()
         .unwrap();
 
-    let event_loop: EventLoop<()> = EventLoop::with_user_event();
+    let event_loop = EventLoop::with_user_event();
     //create surface
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
@@ -79,42 +93,44 @@ fn main() {
             .unwrap()
     };
     //create integration
-    let mut egui = EguiVulkanoBackend::new(
-        surface.clone(),
-        device.clone(),
-        queue,
-        swapchain.format(),
-    );
+    let mut egui =
+        EguiVulkanoBackend::new(surface.clone(), device.clone(), queue, swapchain.format());
     egui.create_frame_buffers(&images);
+    //restricted  eframe setup
+    let mut app_output = epi::backend::AppOutput::default();
+
+    let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
+        event_loop.create_proxy(),
+    )));
+
+    let mut previous_frame_time = None;
+    let mut demo_app = egui_demo_lib::WrapApp::default();
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             egui.begin_frame(surface.clone());
+            let ctx = egui.ctx().clone();
+            let mut frame = epi::backend::FrameBuilder {
+                info: IntegrationInfo {
+                    web_info: None,
+                    prefer_dark_mode: None,
+                    cpu_usage: previous_frame_time,
+                    seconds_since_midnight: Some(seconds_since_midnight()),
+                    native_pixels_per_point: Some(egui.pixels_per_point()),
+                },
+                tex_allocator: &mut egui,
+                output: &mut app_output,
+                repaint_signal: repaint_signal.clone(),
+            }
+            .build();
 
-            let mut quit = false;
+            let egui_start = Instant::now();
 
-            egui::SidePanel::left("my_side_panel").show(egui.ctx(), |ui| {
-                ui.heading("Hello World!");
-                if ui.button("Quit").clicked() {
-                    quit = true;
-                }
-
-                egui::ComboBox::from_label("Version")
-                    .width(150.0)
-                    .selected_text("foo")
-                    .show_ui(ui, |ui| {
-                        egui::CollapsingHeader::new("Dev")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                ui.label("contents");
-                            });
-                    });
-            });
+            demo_app.update(&ctx, &mut frame);
 
             let (needs_repaint, shapes) = egui.end_frame(surface.clone());
-
-            *control_flow = if quit {
-                winit::event_loop::ControlFlow::Exit
-            } else if needs_repaint {
+            let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
+            previous_frame_time = Some(frame_time);
+            *control_flow = if needs_repaint {
                 surface.window().request_redraw();
                 winit::event_loop::ControlFlow::Poll
             } else {
@@ -133,27 +149,18 @@ fn main() {
                         }
                         Err(e) => panic!("Failed to acquire next image: {:?}", e),
                     };
-
                 if suboptimal {
                     return;
                 }
-
                 let render_target = RenderTarget::FrameBufferIndex(image_num);
-
                 let mut render_command = AutoCommandBufferBuilder::primary(
                     device.clone(),
                     queue_family,
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .unwrap();
-
-                //before egui draw
-
                 //add egui draw call for command buffer builder
                 egui.paint(render_target, &mut render_command, shapes);
-
-                //after egui draw
-
                 egui.painter_mut()
                     .present_to_screen(render_command.build().unwrap(), acquire_future);
             }
