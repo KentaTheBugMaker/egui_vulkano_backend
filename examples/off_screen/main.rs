@@ -11,7 +11,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget, ScreenDescriptor};
+use egui_vulkano_backend::{EguiVulkanoBackend, ScreenDescriptor};
 
 use crate::renderer::TeapotRenderer;
 use once_cell::sync::OnceCell;

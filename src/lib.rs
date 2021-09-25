@@ -128,7 +128,7 @@ impl EguiVulkanoBackend {
                 return;
             }
         };
-        let target=RenderTarget::FrameBufferIndex(image_number);
+        let target = RenderTarget::FrameBufferIndex(image_number);
         self.painter.create_command_buffer(
             command_buffer_builder,
             target,

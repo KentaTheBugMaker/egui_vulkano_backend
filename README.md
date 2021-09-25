@@ -28,7 +28,7 @@ cargo run --example demo
 ## known bug
 
 None
-## Released
+## Not Released
 * target egui future release + vulkano 0.25
 * demo changed
 * use official integration `egui_for_winit` like `egui_glium` does

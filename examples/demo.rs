@@ -13,7 +13,7 @@ use vulkano_win::VkSurfaceBuild;
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::{EguiVulkanoBackend, RenderTarget};
+use egui_vulkano_backend::EguiVulkanoBackend;
 
 use epi::{App, IntegrationInfo};
 use once_cell::sync::OnceCell;
