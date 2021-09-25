@@ -107,7 +107,7 @@ fn main() {
     let mut demo_app = egui_demo_lib::WrapApp::default();
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
-            egui.begin_frame(surface.clone());
+            egui.begin_frame();
             let ctx = egui.ctx().clone();
             let mut frame = epi::backend::FrameBuilder {
                 info: IntegrationInfo {
@@ -127,7 +127,7 @@ fn main() {
 
             demo_app.update(&ctx, &mut frame);
 
-            let (needs_repaint, shapes) = egui.end_frame(surface.clone());
+            let (needs_repaint, shapes) = egui.end_frame();
             let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
             previous_frame_time = Some(frame_time);
             *control_flow = if needs_repaint {
@@ -152,7 +152,6 @@ fn main() {
                 if suboptimal {
                     return;
                 }
-                let render_target = RenderTarget::FrameBufferIndex(image_num);
                 let mut render_command = AutoCommandBufferBuilder::primary(
                     device.clone(),
                     queue_family,
@@ -160,7 +159,7 @@ fn main() {
                 )
                 .unwrap();
                 //add egui draw call for command buffer builder
-                egui.paint(render_target, &mut render_command, shapes);
+                egui.paint(image_num, &mut render_command, shapes);
                 egui.painter_mut()
                     .present_to_screen(render_command.build().unwrap(), acquire_future);
             }

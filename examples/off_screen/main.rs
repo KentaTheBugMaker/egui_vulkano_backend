@@ -118,7 +118,7 @@ fn main() {
         let mut redraw = || {
             // Begin to draw the UI frame.
 
-            egui.begin_frame(surface.clone());
+            egui.begin_frame();
 
             egui::CentralPanel::default().show(egui.ctx(), |ui| {
                 ui.vertical(|ui| {
@@ -145,7 +145,7 @@ fn main() {
                 })
             });
             // End the UI frame. We could now handle the output and draw the UI with the backend.
-            let (needs_repaint, shapes) = egui.end_frame(surface.clone());
+            let (needs_repaint, shapes) = egui.end_frame();
             if needs_repaint {
                 surface.window().request_redraw();
                 winit::event_loop::ControlFlow::Poll
@@ -178,7 +178,6 @@ fn main() {
             }
             teapot_renderer.draw();
 
-            let render_target = RenderTarget::FrameBufferIndex(image_num);
             let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
                 device.clone(),
                 queue_family,
@@ -186,7 +185,7 @@ fn main() {
             )
             .unwrap();
 
-            egui.paint(render_target, &mut command_buffer_builder, shapes);
+            egui.paint(image_num, &mut command_buffer_builder, shapes);
             egui.painter_mut()
                 .present_to_screen(command_buffer_builder.build().unwrap(), acquire_future);
         };

@@ -32,6 +32,7 @@ pub struct EguiVulkanoBackend {
     egui_for_winit: egui_for_winit::State,
     egui_ctx: egui::CtxRef,
     painter: Painter,
+    surface: Arc<Surface<winit::window::Window>>,
 }
 impl EguiVulkanoBackend {
     pub fn new(
@@ -44,6 +45,7 @@ impl EguiVulkanoBackend {
             egui_ctx: Default::default(),
             egui_for_winit: egui_for_winit::State::new(surface.window()),
             painter: crate::painter::Painter::new(device, queue, render_target_format),
+            surface,
         }
     }
 
@@ -76,11 +78,8 @@ impl EguiVulkanoBackend {
         self.egui_for_winit.is_quit_event(event)
     }
 
-    pub fn begin_frame(
-        &mut self,
-        surface: Arc<vulkano::swapchain::Surface<winit::window::Window>>,
-    ) {
-        let raw_input = self.take_raw_input(surface);
+    pub fn begin_frame(&mut self) {
+        let raw_input = self.take_raw_input();
         self.begin_frame_with_input(raw_input);
     }
 
@@ -89,36 +88,26 @@ impl EguiVulkanoBackend {
     }
 
     /// Prepare for a new frame. Normally you would call [`Self::begin_frame`] instead.
-    pub fn take_raw_input(
-        &mut self,
-        surface: Arc<vulkano::swapchain::Surface<winit::window::Window>>,
-    ) -> egui::RawInput {
-        self.egui_for_winit.take_egui_input(surface.window())
+    pub fn take_raw_input(&mut self) -> egui::RawInput {
+        self.egui_for_winit.take_egui_input(self.surface.window())
     }
 
     /// Returns `needs_repaint` and shapes to draw.
-    pub fn end_frame(
-        &mut self,
-        surface: Arc<vulkano::swapchain::Surface<winit::window::Window>>,
-    ) -> (bool, Vec<egui::epaint::ClippedShape>) {
+    pub fn end_frame(&mut self) -> (bool, Vec<egui::epaint::ClippedShape>) {
         let (egui_output, shapes) = self.egui_ctx.end_frame();
         let needs_repaint = egui_output.needs_repaint;
-        self.handle_output(surface, egui_output);
+        self.handle_output(egui_output);
         (needs_repaint, shapes)
     }
 
-    pub fn handle_output(
-        &mut self,
-        surface: Arc<vulkano::swapchain::Surface<winit::window::Window>>,
-        output: egui::Output,
-    ) {
+    pub fn handle_output(&mut self, output: egui::Output) {
         self.egui_for_winit
-            .handle_output(surface.window(), &self.egui_ctx, output);
+            .handle_output(self.surface.window(), &self.egui_ctx, output);
     }
 
     pub fn paint(
         &mut self,
-        target: RenderTarget,
+        image_number: usize,
         command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         shapes: Vec<egui::epaint::ClippedShape>,
     ) {
@@ -128,27 +117,18 @@ impl EguiVulkanoBackend {
 
         let clipped_meshes = self.egui_ctx.tessellate(shapes);
         let sf = self.egui_for_winit.pixels_per_point();
-        let screen_desc = match &target {
-            RenderTarget::ColorAttachment(x) => {
-                let dimension = x.image().dimensions();
+        let screen_desc = {
+            if let Some(fb) = self.painter.frame_buffers.get(image_number) {
                 ScreenDescriptor {
-                    physical_width: dimension.width(),
-                    physical_height: dimension.height(),
+                    physical_width: fb.width(),
+                    physical_height: fb.height(),
                     scale_factor: sf,
                 }
-            }
-            RenderTarget::FrameBufferIndex(x) => {
-                if let Some(fb) = self.painter.frame_buffers.get(*x) {
-                    ScreenDescriptor {
-                        physical_width: fb.width(),
-                        physical_height: fb.height(),
-                        scale_factor: sf,
-                    }
-                } else {
-                    return;
-                }
+            } else {
+                return;
             }
         };
+        let target=RenderTarget::FrameBufferIndex(image_number);
         self.painter.create_command_buffer(
             command_buffer_builder,
             target,
