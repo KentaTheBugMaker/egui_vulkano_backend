@@ -21,7 +21,7 @@ use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract};
 #[cfg(feature = "depth_rendering_mode")]
 use vulkano::image::ImageAccess;
-use vulkano::image::{AttachmentImage, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage};
+use vulkano::image::{AttachmentImage, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage, ImageAccess};
 use vulkano::memory::pool::StdMemoryPool;
 use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
@@ -154,9 +154,9 @@ impl Painter {
     }
 
     /// you must call when SwapChain  resize or before first create_command_buffer call
-    pub fn create_frame_buffers<Wnd: Send + Sync + 'static>(
+    pub fn create_frame_buffers(
         &mut self,
-        swap_chain_images: &[Arc<SwapchainImage<Wnd>>],
+        swap_chain_images: &[Arc<impl ImageAccess+Send+Sync+'static>],
     ) {
         self.frame_buffers = swap_chain_images
             .iter()
@@ -167,7 +167,7 @@ impl Painter {
                     .unwrap();
                 Arc::new(fb.build().unwrap()) as Arc<dyn FramebufferAbstract + Send + Sync>
             })
-            .collect::<Vec<_>>();
+            .collect();
     }
     /// execute command and present to screen
     pub fn present_to_screen<Wnd>(

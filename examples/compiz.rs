@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::Timelike;
 
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::image::ImageUsage;
+use vulkano::image::{ImageUsage, AttachmentImage};
 use vulkano::instance::Instance;
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
@@ -20,6 +20,10 @@ use once_cell::sync::OnceCell;
 use std::time::Instant;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
+use egui_demo_lib::WrapApp;
+use egui_for_winit::winit::event::VirtualKeyCode;
+use winit::event::WindowEvent;
+use egui::RawInput;
 
 enum Event {
     RequestRedraw,
@@ -32,6 +36,11 @@ impl epi::RepaintSignal for ExampleRepaintSignal {
         self.0.lock().unwrap().send_event(Event::RequestRedraw).ok();
     }
 }
+
+/// How long does it need for rotate to next desktop.
+const TRANSITION_TIME:f32=0.5;
+/// How many displays this  app have.
+const DISPLAYS:usize =4;
 
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
@@ -68,7 +77,7 @@ fn main() {
         &device_ext,
         [(queue_family, 0.5)].iter().cloned(),
     )
-    .unwrap();
+        .unwrap();
     let queue = queues.next().unwrap();
 
     let (mut swapchain, images) = {
@@ -103,7 +112,33 @@ fn main() {
     )));
 
     let mut previous_frame_time = None;
-    let mut demo_app = egui_demo_lib::WrapApp::default();
+
+    let mut current_virtual_desktop:usize=0;
+
+    let mut switch_display =move |egui_input:&RawInput,key_code:VirtualKeyCode|{
+        if egui_input.modifiers.alt && egui_input.modifiers.ctrl{
+            if key_code==VirtualKeyCode::Left {
+                current_virtual_desktop=current_virtual_desktop.wrapping_add(1);
+            }else if key_code==VirtualKeyCode::Right {
+                current_virtual_desktop=current_virtual_desktop.wrapping_sub(1);
+            }
+            let display_number= current_virtual_desktop %DISPLAYS;
+        }
+    };
+
+    // launch many apps
+    let mut demo_apps:Vec<WrapApp>= (0..DISPLAYS).into_iter().map(|x|{egui_demo_lib::WrapApp::default()}).collect();
+    // create egui render target
+    let mut rendering_surfaces:Vec<Arc<AttachmentImage>>=vec![];
+
+    let mut re_creator=move |device:Arc<Device>,swapchain:Arc<Swapchain<winit::window::Window>>|->Vec<Arc<AttachmentImage>> {
+        (0..DISPLAYS).into_iter().map(|x| {
+            AttachmentImage::new(device.clone(), swapchain.dimensions(), swapchain.format()).unwrap()
+        }).collect()
+    };
+    // create surfaces
+    rendering_surfaces=re_creator(device.clone(),swapchain.clone());
+
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             egui.begin_frame();
@@ -120,11 +155,13 @@ fn main() {
                 output: &mut app_output,
                 repaint_signal: repaint_signal.clone(),
             }
-            .build();
+                .build();
 
             let egui_start = Instant::now();
 
-            demo_app.update(&ctx, &mut frame);
+
+            demo_apps[current_virtual_desktop].update(&ctx, &mut frame);
+
 
             let (needs_repaint, shapes) = egui.end_frame();
             let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
@@ -156,7 +193,7 @@ fn main() {
                     queue_family,
                     CommandBufferUsage::OneTimeSubmit,
                 )
-                .unwrap();
+                    .unwrap();
                 //add egui draw call for command buffer builder
                 egui.paint(image_num, &mut render_command, shapes);
                 egui.painter_mut()
@@ -183,8 +220,17 @@ fn main() {
                     };
                 swapchain = new_swapchain;
                 egui.create_frame_buffers(&new_images);
+                rendering_surfaces=re_creator(device.clone(),swapchain.clone());
+
             }
             winit::event::Event::WindowEvent { event, .. } => {
+                //watch Ctrl+Alt+< or >
+                if let WindowEvent::KeyboardInput {input,..}=event{
+                    if let Some(key_code)=input.virtual_keycode {
+                        switch_display(egui.egui_input(),key_code)
+                    }
+                }
+
                 if egui.is_quit_event(&event) {
                     *control_flow = winit::event_loop::ControlFlow::Exit;
                 }

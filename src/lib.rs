@@ -15,7 +15,7 @@ use egui::TextureId;
 //vulkano
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::ImageViewCreationError;
-use vulkano::image::{ImageCreationError, ImageViewAbstract, SwapchainImage};
+use vulkano::image::{ImageCreationError, ImageViewAbstract, SwapchainImage, ImageAccess};
 use vulkano::render_pass::FramebufferAbstract;
 
 use crate::painter::Painter;
