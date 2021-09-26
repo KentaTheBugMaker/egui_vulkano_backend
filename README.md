@@ -26,8 +26,8 @@ cargo run --example demo
 ```
 
 ## known bug
-
-None
+* stack overflow on debug build
+  * if you use release build not affected
 ## Not Released
 * target egui future release + vulkano 0.25
 * demo changed

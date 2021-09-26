@@ -15,7 +15,7 @@ use egui::TextureId;
 //vulkano
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::ImageViewCreationError;
-use vulkano::image::{ImageCreationError, ImageViewAbstract, SwapchainImage, ImageAccess};
+use vulkano::image::{ImageCreationError, ImageViewAbstract,ImageAccess};
 use vulkano::render_pass::FramebufferAbstract;
 
 use crate::painter::Painter;
@@ -136,9 +136,11 @@ impl EguiVulkanoBackend {
             &screen_desc,
         )
     }
-    pub fn create_frame_buffers(
+    /// I extended to any image to write compiz sample
+    ///
+    pub fn create_frame_buffers<I:ImageAccess+Send+Sync+'static>(
         &mut self,
-        swap_chain_images: &[Arc<SwapchainImage<winit::window::Window>>],
+        swap_chain_images: &[Arc<I>],
     ) {
         self.painter.create_frame_buffers(swap_chain_images)
     }

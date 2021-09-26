@@ -1,4 +1,4 @@
-use std::ffi::CString;
+use std::ffi::CStr;
 use std::sync::Arc;
 
 use vulkano::device::Device;
@@ -6,9 +6,7 @@ use vulkano::format::Format;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::pipeline::layout::PipelineLayoutPcRange;
-use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
-};
+use vulkano::pipeline::shader::{GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,SpecializationConstants};
 use vulkano::render_pass::{RenderPass, Subpass};
 
 use crate::painter::{EguiVulkanoVertex, Pipeline, PushConstants};
@@ -17,22 +15,23 @@ use vulkano::descriptor_set::layout::{
     DescriptorDesc, DescriptorDescTy, DescriptorImageDesc, DescriptorImageDescArray,
     DescriptorImageDescDimensions, DescriptorSetDesc,
 };
+use log::debug;
 
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
     //this is safe because we use offline compiled shader binary and shipped with this backend
-
+    debug!("start create shader modules");
     let vs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
+    debug!("vs_module created");
     let fs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/frag.spv")) }.unwrap();
-    let main = CString::new("main").unwrap();
+    debug!("fs_module created");
     /*
     layout(set = 1, binding = 0) uniform texture2D t_texture;
     layout(set = 0, binding = 0) uniform sampler s_texture;
     layout(push_constant) uniform UniformBuffer {
         vec2 u_screen_size;
         bool is_egui_system_texture;
-        float layer;
     };
     */
     let pc_range = Some(PipelineLayoutPcRange {
@@ -47,7 +46,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             compute: false,
         },
     });
-
+    debug!("pc_range created");
     let descriptor_set_desc_0 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
         ty: DescriptorDescTy::Sampler,
         array_count: 1,
@@ -61,6 +60,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         },
         readonly: true,
     })]);
+    debug!("descriptor set desc 0 created");
     let descriptor_set_desc_1 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
         ty: DescriptorDescTy::Image(DescriptorImageDesc {
             sampled: true,
@@ -80,7 +80,9 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         },
         readonly: true,
     })]);
+    debug!("descriptor set desc 1 created");
     let descriptor_sets = vec![descriptor_set_desc_0, descriptor_set_desc_1];
+    debug!("descriptor  set created");
     /*
         # SAFETY
         [x] one entry per location
@@ -105,6 +107,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             },
         ])
     };
+    debug!("vs input shader interface created");
     let vs_out = unsafe {
         ShaderInterface::new_unchecked(vec![
             ShaderInterfaceEntry {
@@ -119,6 +122,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             },
         ])
     };
+    debug!("vs output fs input shader interface created");
     let fs_out = unsafe {
         ShaderInterface::new_unchecked(vec![ShaderInterfaceEntry {
             location: 0..1,
@@ -126,30 +130,31 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             name: Some(std::borrow::Cow::Borrowed("f_color")),
         }])
     };
-    let spec = &[];
+    debug!("fs output shader interface created");
     let vs_entry = unsafe {
         vs_module.graphics_entry_point(
-            &main,
+            CStr::from_bytes_with_nul_unchecked(b"main\0"),
             descriptor_sets.clone(),
             pc_range,
-            spec,
+            <()>::descriptors(),
             vs_in,
             vs_out.clone(),
             GraphicsShaderType::Vertex,
         )
     };
-
+    debug!("vs entry created");
     let fs_entry = unsafe {
         fs_module.graphics_entry_point(
-            &main,
+            CStr::from_bytes_with_nul_unchecked(b"main\0"),
             descriptor_sets,
             pc_range,
-            spec,
+            <()>::descriptors(),
             vs_out,
             fs_out,
             GraphicsShaderType::Fragment,
         )
     };
+    debug!("fs entry created");
     let render_pass = Arc::new(
         RenderPass::new(
             device.clone(),
@@ -157,7 +162,7 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
         )
         .unwrap(),
     );
-
+    debug!("renderpass created");
     let pipeline = Arc::new({
         vulkano::pipeline::GraphicsPipeline::start()
             .viewports_scissors_dynamic(1)
@@ -185,5 +190,6 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
             .build(device)
             .unwrap()
     });
+    debug!("pipeline created");
     pipeline
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::Timelike;
 
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::image::{ImageUsage, AttachmentImage};
+use vulkano::image::ImageUsage;
 use vulkano::instance::Instance;
 use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
@@ -20,11 +20,7 @@ use once_cell::sync::OnceCell;
 use std::time::Instant;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
-use egui_demo_lib::WrapApp;
-use egui_for_winit::winit::event::VirtualKeyCode;
-use winit::event::WindowEvent;
-use egui::RawInput;
-
+use log::{debug};
 enum Event {
     RequestRedraw,
 }
@@ -37,31 +33,30 @@ impl epi::RepaintSignal for ExampleRepaintSignal {
     }
 }
 
-/// How long does it need for rotate to next desktop.
-const TRANSITION_TIME:f32=0.5;
-/// How many displays this  app have.
-const DISPLAYS:usize =4;
-
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
     // `triangle` examples if you haven't done so yet.
 
+
+    let env=env_logger::Env::new().filter_or("RUST_LOG","debug");
+    env_logger::init_from_env(env);
     let required_extensions = vulkano_win::required_extensions();
     static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
     INSTANCE
-        .set(Instance::new(None, Version::V1_0, &required_extensions, None).unwrap())
+        .set(Instance::new(None, Version::V1_2, &required_extensions, None).unwrap())
         .unwrap();
+    debug!("instance created");
     let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
         .next()
         .unwrap();
-
+    debug!("physical device got");
     let event_loop = EventLoop::with_user_event();
     //create surface
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
         .build_vk_surface(&event_loop, INSTANCE.get().unwrap().clone())
         .unwrap();
-
+    debug!("surface created");
     let queue_family = physical
         .queue_families()
         .find(|&q| q.supports_graphics() && surface.is_supported(q).unwrap_or(false))
@@ -78,8 +73,9 @@ fn main() {
         [(queue_family, 0.5)].iter().cloned(),
     )
         .unwrap();
+    debug!("device created");
     let queue = queues.next().unwrap();
-
+    debug!("queue created");
     let (mut swapchain, images) = {
         let caps = surface.capabilities(physical).unwrap();
         assert!(caps.supported_formats.contains(&(
@@ -100,9 +96,11 @@ fn main() {
             .build()
             .unwrap()
     };
+    debug!("swapchain created");
     //create integration
     let mut egui =
         EguiVulkanoBackend::new(surface.clone(), device.clone(), queue, swapchain.format());
+    debug!("integration created");
     egui.create_frame_buffers(&images);
     //restricted  eframe setup
     let mut app_output = epi::backend::AppOutput::default();
@@ -112,33 +110,7 @@ fn main() {
     )));
 
     let mut previous_frame_time = None;
-
-    let mut current_virtual_desktop:usize=0;
-
-    let mut switch_display =move |egui_input:&RawInput,key_code:VirtualKeyCode|{
-        if egui_input.modifiers.alt && egui_input.modifiers.ctrl{
-            if key_code==VirtualKeyCode::Left {
-                current_virtual_desktop=current_virtual_desktop.wrapping_add(1);
-            }else if key_code==VirtualKeyCode::Right {
-                current_virtual_desktop=current_virtual_desktop.wrapping_sub(1);
-            }
-            let display_number= current_virtual_desktop %DISPLAYS;
-        }
-    };
-
-    // launch many apps
-    let mut demo_apps:Vec<WrapApp>= (0..DISPLAYS).into_iter().map(|x|{egui_demo_lib::WrapApp::default()}).collect();
-    // create egui render target
-    let mut rendering_surfaces:Vec<Arc<AttachmentImage>>=vec![];
-
-    let mut re_creator=move |device:Arc<Device>,swapchain:Arc<Swapchain<winit::window::Window>>|->Vec<Arc<AttachmentImage>> {
-        (0..DISPLAYS).into_iter().map(|x| {
-            AttachmentImage::new(device.clone(), swapchain.dimensions(), swapchain.format()).unwrap()
-        }).collect()
-    };
-    // create surfaces
-    rendering_surfaces=re_creator(device.clone(),swapchain.clone());
-
+    let mut demo_app = egui_demo_lib::WrapApp::default();
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             egui.begin_frame();
@@ -159,9 +131,7 @@ fn main() {
 
             let egui_start = Instant::now();
 
-
-            demo_apps[current_virtual_desktop].update(&ctx, &mut frame);
-
+            demo_app.update(&ctx, &mut frame);
 
             let (needs_repaint, shapes) = egui.end_frame();
             let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
@@ -220,17 +190,8 @@ fn main() {
                     };
                 swapchain = new_swapchain;
                 egui.create_frame_buffers(&new_images);
-                rendering_surfaces=re_creator(device.clone(),swapchain.clone());
-
             }
             winit::event::Event::WindowEvent { event, .. } => {
-                //watch Ctrl+Alt+< or >
-                if let WindowEvent::KeyboardInput {input,..}=event{
-                    if let Some(key_code)=input.virtual_keycode {
-                        switch_display(egui.egui_input(),key_code)
-                    }
-                }
-
                 if egui.is_quit_event(&event) {
                     *control_flow = winit::event_loop::ControlFlow::Exit;
                 }

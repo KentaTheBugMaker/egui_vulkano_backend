@@ -11,7 +11,7 @@ layout(push_constant) uniform UniformBuffer {
     bool is_egui_system_texture;
 };
 void main() {
-    vec4 texture_color=texture(sampler2D(t_texture, s_texture), v_tex_coord);
+    vec4 texture_color=texture(sampler2D(t_texture,s_texture),v_tex_coord);
     if (is_egui_system_texture){
         texture_color= texture_color.rrrr;
     }

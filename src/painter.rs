@@ -21,7 +21,7 @@ use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract};
 #[cfg(feature = "depth_rendering_mode")]
 use vulkano::image::ImageAccess;
-use vulkano::image::{AttachmentImage, ImageDimensions, ImageUsage, MipmapsCount, SwapchainImage, ImageAccess};
+use vulkano::image::{AttachmentImage, ImageDimensions, ImageUsage, MipmapsCount, ImageAccess};
 use vulkano::memory::pool::StdMemoryPool;
 use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
@@ -97,6 +97,7 @@ TextureId => Option<u64>
 Egui => None
 User(id) => Some(id)
 */
+use log::debug;
 impl Painter {
     ///create command builder
     ///
@@ -106,7 +107,9 @@ impl Painter {
         queue: Arc<Queue>,
         render_target_format: vulkano::format::Format,
     ) -> Self {
+        debug!("starting painter init");
         let pipeline = create_pipeline(device.clone(), render_target_format);
+        debug!("pipeline created");
         let sampler = Sampler::new(
             device.clone(),
             Filter::Linear,
@@ -121,6 +124,7 @@ impl Painter {
             0.0,
         )
         .expect("failed to create sampler");
+        debug!("sampler created");
         let thread_pool = ThreadPool::new(num_cpus::get());
 
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());

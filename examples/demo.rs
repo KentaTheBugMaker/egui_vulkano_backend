@@ -40,7 +40,7 @@ fn main() {
     let required_extensions = vulkano_win::required_extensions();
     static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
     INSTANCE
-        .set(Instance::new(None, Version::V1_0, &required_extensions, None).unwrap())
+        .set(Instance::new(None, Version::V1_2, &required_extensions, None).unwrap())
         .unwrap();
     let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
         .next()
