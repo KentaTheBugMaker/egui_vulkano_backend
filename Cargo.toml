@@ -13,7 +13,7 @@ readme = "README.md"
 [features]
 backend_debug = []
 [dependencies]
-egui_for_winit = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit" }
+egui-winit = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit" }
 epi = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit" }
 num_cpus="1"
 threadpool="1"

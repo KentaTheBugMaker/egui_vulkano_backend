@@ -15,7 +15,7 @@ use egui::TextureId;
 //vulkano
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::ImageViewCreationError;
-use vulkano::image::{ImageCreationError, ImageViewAbstract,ImageAccess};
+use vulkano::image::{ImageAccess, ImageCreationError, ImageViewAbstract};
 use vulkano::render_pass::FramebufferAbstract;
 
 use crate::painter::Painter;
@@ -29,7 +29,7 @@ pub(crate) mod shader;
 
 /// Glium backend like
 pub struct EguiVulkanoBackend {
-    egui_for_winit: egui_for_winit::State,
+    egui_winit: egui_winit::State,
     egui_ctx: egui::CtxRef,
     painter: Painter,
     surface: Arc<Surface<winit::window::Window>>,
@@ -43,12 +43,14 @@ impl EguiVulkanoBackend {
     ) -> Self {
         Self {
             egui_ctx: Default::default(),
-            egui_for_winit: egui_for_winit::State::new(surface.window()),
+            egui_winit: egui_winit::State::new(surface.window()),
             painter: crate::painter::Painter::new(device, queue, render_target_format),
             surface,
         }
     }
-
+    pub fn request_redraw(&self) {
+        self.surface.window().request_redraw();
+    }
     pub fn ctx(&self) -> &egui::CtxRef {
         &self.egui_ctx
     }
@@ -62,20 +64,20 @@ impl EguiVulkanoBackend {
     }
 
     pub fn pixels_per_point(&self) -> f32 {
-        self.egui_for_winit.pixels_per_point()
+        self.egui_winit.pixels_per_point()
     }
 
     pub fn egui_input(&self) -> &egui::RawInput {
-        self.egui_for_winit.egui_input()
+        self.egui_winit.egui_input()
     }
 
     pub fn on_event(&mut self, event: &winit::event::WindowEvent<'_>) {
-        self.egui_for_winit.on_event(event);
+        self.egui_winit.on_event(event);
     }
 
     /// Is this a close event or a Cmd-Q/Alt-F4 keyboard command?
     pub fn is_quit_event(&self, event: &winit::event::WindowEvent<'_>) -> bool {
-        self.egui_for_winit.is_quit_event(event)
+        self.egui_winit.is_quit_event(event)
     }
 
     pub fn begin_frame(&mut self) {
@@ -89,7 +91,7 @@ impl EguiVulkanoBackend {
 
     /// Prepare for a new frame. Normally you would call [`Self::begin_frame`] instead.
     pub fn take_raw_input(&mut self) -> egui::RawInput {
-        self.egui_for_winit.take_egui_input(self.surface.window())
+        self.egui_winit.take_egui_input(self.surface.window())
     }
 
     /// Returns `needs_repaint` and shapes to draw.
@@ -101,7 +103,7 @@ impl EguiVulkanoBackend {
     }
 
     pub fn handle_output(&mut self, output: egui::Output) {
-        self.egui_for_winit
+        self.egui_winit
             .handle_output(self.surface.window(), &self.egui_ctx, output);
     }
 
@@ -116,7 +118,7 @@ impl EguiVulkanoBackend {
             .request_upload_egui_texture(&self.egui_ctx.texture());
 
         let clipped_meshes = self.egui_ctx.tessellate(shapes);
-        let sf = self.egui_for_winit.pixels_per_point();
+        let sf = self.egui_winit.pixels_per_point();
         let screen_desc = {
             if let Some(fb) = self.painter.frame_buffers.get(image_number) {
                 ScreenDescriptor {
@@ -138,7 +140,7 @@ impl EguiVulkanoBackend {
     }
     /// I extended to any image to write compiz sample
     ///
-    pub fn create_frame_buffers<I:ImageAccess+Send+Sync+'static>(
+    pub fn create_frame_buffers<I: ImageAccess + Send + Sync + 'static>(
         &mut self,
         swap_chain_images: &[Arc<I>],
     ) {

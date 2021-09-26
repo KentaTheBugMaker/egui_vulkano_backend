@@ -130,7 +130,7 @@ fn main() {
             let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
             previous_frame_time = Some(frame_time);
             *control_flow = if needs_repaint {
-                surface.window().request_redraw();
+                egui.request_redraw();
                 winit::event_loop::ControlFlow::Poll
             } else {
                 winit::event_loop::ControlFlow::Wait
@@ -191,7 +191,7 @@ fn main() {
 
                 egui.on_event(&event);
 
-                surface.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
+                egui.request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
 
             _ => (),
