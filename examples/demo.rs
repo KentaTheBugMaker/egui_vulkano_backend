@@ -36,11 +36,23 @@ impl epi::RepaintSignal for ExampleRepaintSignal {
 fn main() {
     // The start of this examples is exactly the same as `triangle`. You should read the
     // `triangle` examples if you haven't done so yet.
+    #[cfg(not(target_os = "macos"))]
+    let layers = vec![
+       // "VK_LAYER_LUNARG_api_dump",
+       // "VK_LAYER_LUNARG_device_simulation",
+       // "VK_LAYER_LUNARG_gfxreconstruct",
+       // "VK_LAYER_KHRONOS_synchronization2",
+        "VK_LAYER_KHRONOS_validation",
+        "VK_LAYER_LUNARG_monitor",
+       // "VK_LAYER_LUNARG_screenshot",
+    ];
+    #[cfg(target_os = "macos")]
+    let layers = vec!["VK_LAYER_KHRONOS_validation"];
 
     let required_extensions = vulkano_win::required_extensions();
     static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
     INSTANCE
-        .set(Instance::new(None, Version::V1_2, &required_extensions, None).unwrap())
+        .set(Instance::new(None, Version::V1_2, &required_extensions, layers).unwrap())
         .unwrap();
     let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
         .next()

@@ -13,11 +13,12 @@ readme = "README.md"
 [features]
 backend_debug = []
 [dependencies]
-egui-winit = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit" }
-epi = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit" }
+egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master" }
+epi = { git = "https://github.com/emilk/egui.git", branch = "master" }
 num_cpus="1"
 threadpool="1"
 vulkano = "^0.25"
+vulkano-shaders = "0.25.0"
 winit = "0.25"
 log = "0.4"
 env_logger="0.9"
@@ -26,7 +27,7 @@ once_cell = "1.8"
 cgmath = "0.18"
 chrono = "0.4"
 
-egui = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit" }
-egui_demo_lib = { git = "https://github.com/emilk/egui.git", branch = "egui_for_winit", features = ["syntect","ehttp","http","syntax_highlighting"] }
+egui = { git = "https://github.com/emilk/egui.git", branch = "master" }
+egui_demo_lib = { git = "https://github.com/emilk/egui.git", branch = "master", features = ["syntect","ehttp","http","syntax_highlighting"] }
 
 vulkano-win = "^0.25"

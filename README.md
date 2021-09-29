@@ -26,13 +26,15 @@ cargo run --example demo
 ```
 
 ## known bug
-* stack overflow on debug build
+* stack overflow on debug build from 0.14.0 (bisected) on Windows
+  * I tested official vulkano-shaders shader! macro produce same result.
   * if you use release build not affected
+
 ## Not Released
 * target egui future release + vulkano 0.25
 * demo changed
 * use official integration `egui_for_winit` like `egui_glium` does
-## Update v0.14.0
+## Update v0.14.0 (Affected version)
 * target egui 0.14. + vulkano 0.25
 * remove wait_image_upload
 * demo change

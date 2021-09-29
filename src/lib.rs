@@ -72,7 +72,7 @@ impl EguiVulkanoBackend {
     }
 
     pub fn on_event(&mut self, event: &winit::event::WindowEvent<'_>) {
-        self.egui_winit.on_event(event);
+        self.egui_winit.on_event(self.egui_ctx.as_ref(),event);
     }
 
     /// Is this a close event or a Cmd-Q/Alt-F4 keyboard command?
