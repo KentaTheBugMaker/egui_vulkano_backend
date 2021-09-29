@@ -38,13 +38,13 @@ fn main() {
     // `triangle` examples if you haven't done so yet.
     #[cfg(not(target_os = "macos"))]
     let layers = vec![
-       // "VK_LAYER_LUNARG_api_dump",
-       // "VK_LAYER_LUNARG_device_simulation",
-       // "VK_LAYER_LUNARG_gfxreconstruct",
-       // "VK_LAYER_KHRONOS_synchronization2",
+        // "VK_LAYER_LUNARG_api_dump",
+        // "VK_LAYER_LUNARG_device_simulation",
+        // "VK_LAYER_LUNARG_gfxreconstruct",
+        // "VK_LAYER_KHRONOS_synchronization2",
         "VK_LAYER_KHRONOS_validation",
         "VK_LAYER_LUNARG_monitor",
-       // "VK_LAYER_LUNARG_screenshot",
+        // "VK_LAYER_LUNARG_screenshot",
     ];
     #[cfg(target_os = "macos")]
     let layers = vec!["VK_LAYER_KHRONOS_validation"];

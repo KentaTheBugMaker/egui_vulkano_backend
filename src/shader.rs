@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 
 use vulkano::device::Device;
@@ -6,17 +5,15 @@ use vulkano::format::Format;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
-
 use vulkano::render_pass::{RenderPass, Subpass};
 
 use crate::painter::{EguiVulkanoVertex, Pipeline};
 use crate::render_pass::render_pass_desc_from_format;
 use log::debug;
 
-
 pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format) -> Arc<Pipeline> {
-    let fs=fs::Shader::load(device.clone()).unwrap();
-    let vs=vs::Shader::load(device.clone()).unwrap();
+    let fs = fs::Shader::load(device.clone()).unwrap();
+    let vs = vs::Shader::load(device.clone()).unwrap();
     let render_pass = Arc::new(
         RenderPass::new(
             device.clone(),
@@ -55,14 +52,14 @@ pub(crate) fn create_pipeline(device: Arc<Device>, render_target_format: Format)
     debug!("pipeline created");
     pipeline
 }
-mod vs{
-    vulkano_shaders::shader!{
+mod vs {
+    vulkano_shaders::shader! {
         ty: "vertex",
         path:"./src/shaders/shader.vert"
     }
 }
-mod fs{
-    vulkano_shaders::shader!{
+mod fs {
+    vulkano_shaders::shader! {
         ty: "fragment",
         path:"./src/shaders/shader.frag"
     }
