@@ -304,7 +304,9 @@ impl Painter {
             command_buffer_builder.bind_vertex_buffers(0, render_resource.vertex_buffer);
             command_buffer_builder.bind_index_buffer(render_resource.index_buffer);
             command_buffer_builder.set_scissor(0, vec![render_resource.scissor]);
-            command_buffer_builder.draw_indexed(indices, 1, 0, 0, 0);
+            command_buffer_builder
+                .draw_indexed(indices, 1, 0, 0, 0)
+                .unwrap();
         };
 
         {
