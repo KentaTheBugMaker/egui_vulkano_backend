@@ -27,7 +27,6 @@ use vulkano::memory::pool::StdMemoryPool;
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
-use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;
 
@@ -76,7 +75,6 @@ pub struct Painter {
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
-    sampler_desc_set: Arc<dyn DescriptorSet>,
     //set=0 binding=0
     thread_pool: ThreadPool,
     render_resource_tx: Sender<RenderResource>,
@@ -109,33 +107,11 @@ impl Painter {
         debug!("starting painter init");
         let pipeline = create_pipeline(device.clone(), render_target_format);
         debug!("pipeline created");
-        let sampler = Sampler::new(
-            device.clone(),
-            Filter::Linear,
-            Filter::Linear,
-            MipmapMode::Linear,
-            SamplerAddressMode::ClampToEdge,
-            SamplerAddressMode::ClampToEdge,
-            SamplerAddressMode::ClampToEdge,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-        )
-        .expect("failed to create sampler");
-        debug!("sampler created");
         let thread_pool = ThreadPool::new(num_cpus::get());
-
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
         let image_staging_buffer =
             CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
-        let mut desc_set_builder =
-            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone());
-        desc_set_builder.add_sampler(sampler).unwrap();
-
-        let sampler_desc_set =
-            Arc::new(desc_set_builder.build().unwrap()) as Arc<dyn DescriptorSet>;
         let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
 
         Self {
@@ -148,7 +124,6 @@ impl Painter {
             vertex_buffer_pool,
             index_buffer_pool,
             image_staging_buffer,
-            sampler_desc_set,
             thread_pool,
             render_resource_tx: buffers_tx,
             render_resource_rx: buffers_rx,
@@ -296,7 +271,7 @@ impl Painter {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout().clone(),
                 0,
-                (self.sampler_desc_set.clone(), texture),
+                texture,
             );
             command_buffer_builder.bind_vertex_buffers(0, render_resource.vertex_buffer);
             command_buffer_builder.bind_index_buffer(render_resource.index_buffer);
@@ -379,7 +354,7 @@ impl Painter {
         image_view: Arc<dyn ImageViewAbstract>,
     ) -> Arc<dyn DescriptorSet> {
         let mut desc_set_builder =
-            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[1].clone());
+            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone());
         desc_set_builder.add_image(image_view).unwrap();
         Arc::new(desc_set_builder.build().unwrap())
     }

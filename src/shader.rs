@@ -20,21 +20,34 @@ use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
 };
 use vulkano::pipeline::GraphicsPipeline;
+use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 
 pub(crate) fn create_pipeline(
     device: Arc<Device>,
     render_target_format: Format,
 ) -> Arc<GraphicsPipeline> {
     //this is safe because we use offline compiled shader binary and shipped with this backend
-
+    let sampler = Sampler::new(
+        device.clone(),
+        Filter::Linear,
+        Filter::Linear,
+        MipmapMode::Linear,
+        SamplerAddressMode::ClampToEdge,
+        SamplerAddressMode::ClampToEdge,
+        SamplerAddressMode::ClampToEdge,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+    )
+    .expect("failed to create sampler");
     let vs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
     let fs_module =
         unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/frag.spv")) }.unwrap();
     let main = CString::new("main").unwrap();
     /*
-    layout(set = 1, binding = 0) uniform texture2D t_texture;
-    layout(set = 0, binding = 0) uniform sampler s_texture;
+    layout(set = 0, binding = 0) uniform sampler2D t_texture;
     layout(push_constant) uniform UniformBuffer {
         vec2 u_screen_size;
         bool is_egui_system_texture;
@@ -55,28 +68,13 @@ pub(crate) fn create_pipeline(
     });
 
     let descriptor_set_desc_0 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
-        ty: DescriptorDescTy::Sampler {
-            immutable_samplers: vec![],
-        },
-        descriptor_count: 1,
-        stages: ShaderStages {
-            vertex: false,
-            tessellation_control: false,
-            tessellation_evaluation: false,
-            geometry: false,
-            fragment: true,
-            compute: false,
-        },
-        variable_count: false,
-        mutable: false,
-    })]);
-    let descriptor_set_desc_1 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
-        ty: DescriptorDescTy::SampledImage {
+        ty: DescriptorDescTy::CombinedImageSampler {
             image_desc: DescriptorDescImage {
                 format: None,
                 multisampled: false,
                 view_type: ImageViewType::Dim2d,
             },
+            immutable_samplers: vec![sampler],
         },
         descriptor_count: 1,
         stages: ShaderStages {
@@ -90,7 +88,7 @@ pub(crate) fn create_pipeline(
         variable_count: false,
         mutable: false,
     })]);
-    let descriptor_sets = vec![descriptor_set_desc_0, descriptor_set_desc_1];
+    let descriptor_sets = vec![descriptor_set_desc_0];
     /*
         # SAFETY
         [x] one entry per location
