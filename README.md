@@ -24,17 +24,13 @@ project to show you, how to use this crate.
 ```shell
 cargo run --example demo
 ```
-
-## known bug
-* stack overflow on debug build from 0.14.0 (bisected) on Windows
-  * I tested official vulkano-shaders shader! macro produce same result.
-  * if you use release build not affected
+## Known Issue
 
 ## Not Released
-* target egui future release + vulkano 0.25
+* target egui future release + vulkano 0.26
 * demo changed
 * use official integration `egui_for_winit` like `egui_glium` does
-## Update v0.14.0 (Affected version)
+## Update v0.14.0 ([Affected version](#stack_overflow_on_debug_build))
 * target egui 0.14. + vulkano 0.25
 * remove wait_image_upload
 * demo change
@@ -97,6 +93,7 @@ cargo run --example demo
 * doesn't pass color test
 * change tab in sample at debug build cause crash.
 * in egui_demo color test scrollbar glitch 
+* [stack over flow on debug build](#stack_overflow_on_debug_build)
 ## Version list
 
 |egui_vulkano_backend|egui |vulkano |vulkano-shader(dependency) |vulkano-win(if use runner)|
@@ -128,3 +125,9 @@ See [LICENSE-APACHE](https://github.com/t18b219k/egui_vulkano_backend/blob/maste
 * egui_wgpu_backend developers
 * egui_winit_platform developers
 * bug reporter
+## stack_overflow_on_debug_build
+
+stack overflow on debug build from 0.14.0 (bisected) on Windows
+  * I tested official vulkano-shaders shader! macro produce same result.
+  * if you use release build not affected
+  * vulkano 0.25 related problem maybe they can't read properly shader that have push constants. 

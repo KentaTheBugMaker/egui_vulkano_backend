@@ -10,10 +10,10 @@ use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 use crate::{InitRenderAreaError, RecreateErrors, RenderTarget, ScreenDescriptor};
 use threadpool::ThreadPool;
 use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
-use vulkano::buffer::{BufferUsage, CpuBufferPool};
+use vulkano::buffer::{BufferUsage, CpuBufferPool, TypedBufferAccess};
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, DynamicState, PrimaryAutoCommandBuffer, SubpassContents,
+    AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents,
 };
 use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
 use vulkano::descriptor_set::DescriptorSet;
@@ -23,9 +23,9 @@ use vulkano::image::view::{ImageView, ImageViewAbstract};
 use vulkano::image::ImageAccess;
 use vulkano::image::{AttachmentImage, ImageAccess, ImageDimensions, ImageUsage, MipmapsCount};
 use vulkano::memory::pool::StdMemoryPool;
-use vulkano::pipeline::vertex::BuffersDefinition;
+
 use vulkano::pipeline::viewport::{Scissor, Viewport};
-use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
+use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 use vulkano::swapchain::SwapchainAcquireFuture;
@@ -58,7 +58,6 @@ pub(crate) struct PushConstants {
 }
 vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
 
-pub(crate) type Pipeline = GraphicsPipeline<BuffersDefinition>;
 struct RenderResource {
     index_buffer: CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>,
     vertex_buffer: CpuBufferPoolChunk<EguiVulkanoVertex, Arc<StdMemoryPool>>,
@@ -68,12 +67,12 @@ struct RenderResource {
 }
 /// egui rendering command builder
 pub struct Painter {
-    pipeline: Arc<Pipeline>,
+    pipeline: Arc<GraphicsPipeline>,
     egui_texture_version: Option<u64>,
     egui_textures: BTreeMap<Option<u64>, Option<TextureDescriptor>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    pub(crate) frame_buffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    pub(crate) frame_buffers: Vec<Arc<dyn FramebufferAbstract>>,
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
@@ -131,13 +130,12 @@ impl Painter {
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
         let image_staging_buffer =
             CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
-        let sampler_desc_set = Arc::new(
-            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone())
-                .add_sampler(sampler)
-                .unwrap()
-                .build()
-                .unwrap(),
-        ) as Arc<dyn DescriptorSet + Send + Sync>;
+        let mut desc_set_builder =
+            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone());
+        desc_set_builder.add_sampler(sampler).unwrap();
+
+        let sampler_desc_set =
+            Arc::new(desc_set_builder.build().unwrap()) as Arc<dyn DescriptorSet + Send + Sync>;
         let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
 
         Self {
@@ -166,12 +164,12 @@ impl Painter {
             .iter()
             .map(|image| {
                 let view = ImageView::new(image.clone()).unwrap();
-                let fb = Framebuffer::start(self.pipeline.render_pass().clone())
+                let fb = Framebuffer::start(self.pipeline.subpass().render_pass().clone())
                     .add(view)
                     .unwrap()
                     .build()
                     .unwrap();
-                Arc::new(fb) as Arc<dyn FramebufferAbstract + Send + Sync>
+                Arc::new(fb) as Arc<dyn FramebufferAbstract>
             })
             .collect();
     }
@@ -204,34 +202,29 @@ impl Painter {
     ) {
         let framebuffer = match render_target {
             RenderTarget::ColorAttachment(color_attachment) => {
-                let fb = Framebuffer::start(self.pipeline.render_pass().clone())
+                let fb = Framebuffer::start(self.pipeline.subpass().render_pass().clone())
                     .add(color_attachment)
                     .unwrap();
                 Arc::new(fb.build().expect("[BackEnd] failed to create frame buffer"))
             }
             RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
         };
-
+        let physical_height = screen_descriptor.physical_height;
+        let physical_width = screen_descriptor.physical_width;
         let logical = screen_descriptor.logical_size();
+        command_buffer_builder.set_viewport(
+            0,
+            vec![Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [physical_width as f32, physical_height as f32],
+                depth_range: 0.0..1.0,
+            }],
+        );
+        command_buffer_builder.bind_pipeline_graphics(self.pipeline.clone());
 
         command_buffer_builder
             .begin_render_pass(framebuffer, SubpassContents::Inline, vec![[0.0; 4].into()])
             .unwrap();
-
-        let physical_height = screen_descriptor.physical_height;
-        let physical_width = screen_descriptor.physical_width;
-        let mut dynamic = DynamicState {
-            line_width: None,
-            viewports: Some(vec![Viewport {
-                origin: [0.0, 0.0],
-                dimensions: [physical_width as f32, physical_height as f32],
-                depth_range: 0.0..1.0,
-            }]),
-            scissors: None,
-            compare_mask: None,
-            write_mask: None,
-            reference: None,
-        };
 
         #[cfg(feature = "backend_debug")]
         println!("[BackEnd] start frame");
@@ -288,10 +281,8 @@ impl Painter {
             });
             job_count += 1;
         }
-
         let draw = |render_resource: RenderResource| {
             let texture_id = render_resource.texture_id;
-            dynamic.scissors = Some(vec![render_resource.scissor]);
             let texture = self.get_descriptor_set(texture_id);
             let marker = match texture_id {
                 TextureId::User(_) => IS_USER,
@@ -302,20 +293,18 @@ impl Painter {
                 u_screen_size: [logical.0 as f32, logical.1 as f32],
                 marker,
             };
-            {
-                #[cfg(feature = "backend_debug")]
-                println!("Draw!");
-                command_buffer_builder
-                    .draw_indexed(
-                        self.pipeline.clone(),
-                        &dynamic,
-                        render_resource.vertex_buffer,
-                        render_resource.index_buffer,
-                        (self.sampler_desc_set.clone(), texture),
-                        pc,
-                    )
-                    .unwrap();
-            }
+            let indices = render_resource.index_buffer.len() as u32;
+            command_buffer_builder.push_constants(self.pipeline.layout().clone(), 0, pc);
+            command_buffer_builder.bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.pipeline.layout().clone(),
+                0,
+                (self.sampler_desc_set.clone(), texture),
+            );
+            command_buffer_builder.bind_vertex_buffers(0, render_resource.vertex_buffer);
+            command_buffer_builder.bind_index_buffer(render_resource.index_buffer);
+            command_buffer_builder.set_scissor(0, vec![render_resource.scissor]);
+            command_buffer_builder.draw_indexed(indices, 1, 0, 0, 0);
         };
 
         {
@@ -387,16 +376,13 @@ impl Painter {
     }
     #[inline(always)]
     fn create_descriptor_set_from_view(
-        pipeline: Arc<Pipeline>,
+        pipeline: Arc<GraphicsPipeline>,
         image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
     ) -> Arc<dyn DescriptorSet + Send + Sync> {
-        Arc::new(
-            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[1].clone())
-                .add_image(image_view)
-                .unwrap()
-                .build()
-                .unwrap(),
-        )
+        let mut desc_set_builder =
+            PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[1].clone());
+        desc_set_builder.add_image(image_view).unwrap();
+        Arc::new(desc_set_builder.build().unwrap())
     }
     #[inline(always)]
     fn get_descriptor_set(&self, texture_id: TextureId) -> Arc<dyn DescriptorSet + Send + Sync> {
@@ -423,9 +409,9 @@ impl Painter {
                     return;
                 }
                 self.egui_texture_version = version;
-                vulkano::format::Format::R8Unorm
+                vulkano::format::Format::R8_UNORM
             }
-            TextureId::User(_) => vulkano::format::Format::R8G8B8A8Srgb,
+            TextureId::User(_) => vulkano::format::Format::R8G8B8A8_SRGB,
         };
         let staging_sub_buffer = self
             .image_staging_buffer
@@ -519,7 +505,7 @@ impl Painter {
         self.init_vulkano_image_with_parameters(
             dimensions,
             usage,
-            vulkano::format::Format::R8G8B8A8Srgb,
+            vulkano::format::Format::R8G8B8A8_SRGB,
         )
     }
     pub fn init_vulkano_image_with_parameters(
@@ -667,7 +653,7 @@ fn calc_scissor(
         None
     } else {
         Some(Scissor {
-            origin: [clip_min_x as i32, clip_min_y as i32],
+            origin: [clip_min_x as u32, clip_min_y as u32],
             dimensions: [width as u32, height as u32],
         })
     }
