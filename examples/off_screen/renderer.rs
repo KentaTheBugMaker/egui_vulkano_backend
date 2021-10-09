@@ -166,7 +166,7 @@ pub struct TeapotRenderer {
     normal_buffer: Arc<CpuAccessibleBuffer<[Normal]>>,
     pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
-    frame_buffer: Option<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    frame_buffer: Option<Arc<dyn FramebufferAbstract>>,
     uniform_uploading_buffer_pool: CpuBufferPool<Uniforms>,
     rotate: f32,
     aspect_ratio: f32,
@@ -238,7 +238,7 @@ impl TeapotRenderer {
                 .unwrap()
                 .build()
                 .unwrap(),
-        ) as Arc<dyn FramebufferAbstract + Send + Sync>;
+        ) as Arc<dyn FramebufferAbstract>;
         self.frame_buffer.replace(frame_buffer);
         self.aspect_ratio = rt.dimensions()[0] as f32 / rt.dimensions()[1] as f32;
     }

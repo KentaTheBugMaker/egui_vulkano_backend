@@ -140,10 +140,7 @@ impl EguiVulkanoBackend {
     }
     /// I extended to any image to write compiz sample
     ///
-    pub fn create_frame_buffers<I: ImageAccess + Send + Sync + 'static>(
-        &mut self,
-        swap_chain_images: &[Arc<I>],
-    ) {
+    pub fn create_frame_buffers<I: ImageAccess + 'static>(&mut self, swap_chain_images: &[Arc<I>]) {
         self.painter.create_frame_buffers(swap_chain_images)
     }
 }
@@ -181,7 +178,7 @@ impl epi::TextureAllocator for EguiVulkanoBackend {
 }
 
 impl epi::NativeTexture for EguiVulkanoBackend {
-    type Texture = Arc<dyn ImageViewAbstract + Send + Sync>;
+    type Texture = Arc<dyn ImageViewAbstract>;
 
     fn register_native_texture(&mut self, native: Self::Texture) -> TextureId {
         self.painter.register_vulkano_image_view(native)
@@ -208,7 +205,7 @@ pub enum InitRenderAreaError {
 
 pub enum RenderTarget {
     /// render to texture or any other use
-    ColorAttachment(Arc<dyn ImageViewAbstract + Send + Sync>),
+    ColorAttachment(Arc<dyn ImageViewAbstract>),
     /// render to own framebuffer
     FrameBufferIndex(usize),
 }

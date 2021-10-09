@@ -76,7 +76,7 @@ pub struct Painter {
     vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
-    sampler_desc_set: Arc<dyn DescriptorSet + Send + Sync>,
+    sampler_desc_set: Arc<dyn DescriptorSet>,
     //set=0 binding=0
     thread_pool: ThreadPool,
     render_resource_tx: Sender<RenderResource>,
@@ -135,7 +135,7 @@ impl Painter {
         desc_set_builder.add_sampler(sampler).unwrap();
 
         let sampler_desc_set =
-            Arc::new(desc_set_builder.build().unwrap()) as Arc<dyn DescriptorSet + Send + Sync>;
+            Arc::new(desc_set_builder.build().unwrap()) as Arc<dyn DescriptorSet>;
         let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
 
         Self {
@@ -156,10 +156,7 @@ impl Painter {
     }
 
     /// you must call when SwapChain  resize or before first create_command_buffer call
-    pub fn create_frame_buffers<I: ImageAccess + Send + Sync + 'static>(
-        &mut self,
-        swap_chain_images: &[Arc<I>],
-    ) {
+    pub fn create_frame_buffers<I: ImageAccess + 'static>(&mut self, swap_chain_images: &[Arc<I>]) {
         self.frame_buffers = swap_chain_images
             .iter()
             .map(|image| {
@@ -379,15 +376,15 @@ impl Painter {
     #[inline(always)]
     fn create_descriptor_set_from_view(
         pipeline: Arc<GraphicsPipeline>,
-        image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
-    ) -> Arc<dyn DescriptorSet + Send + Sync> {
+        image_view: Arc<dyn ImageViewAbstract>,
+    ) -> Arc<dyn DescriptorSet> {
         let mut desc_set_builder =
             PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[1].clone());
         desc_set_builder.add_image(image_view).unwrap();
         Arc::new(desc_set_builder.build().unwrap())
     }
     #[inline(always)]
-    fn get_descriptor_set(&self, texture_id: TextureId) -> Arc<dyn DescriptorSet + Send + Sync> {
+    fn get_descriptor_set(&self, texture_id: TextureId) -> Arc<dyn DescriptorSet> {
         let t_id = texture_id_as_option_u64(texture_id);
         self.egui_textures
             .get(&t_id)
@@ -434,7 +431,7 @@ impl Painter {
         .unwrap();
         let t_id = texture_id_as_option_u64(id);
         self.thread_pool.execute(move || future.flush().unwrap());
-        let image_view = ImageView::new(image).unwrap() as Arc<dyn ImageViewAbstract + Sync + Send>;
+        let image_view = ImageView::new(image).unwrap() as Arc<dyn ImageViewAbstract>;
         let pipeline = self.pipeline.clone();
         let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view);
         self.egui_textures
@@ -464,7 +461,7 @@ impl Painter {
 
     pub fn register_vulkano_image_view(
         &mut self,
-        image_view: Arc<dyn ImageViewAbstract + Sync + Send>,
+        image_view: Arc<dyn ImageViewAbstract>,
     ) -> TextureId {
         let id = self.alloc_user_texture();
         let t_id = texture_id_as_option_u64(id);
@@ -584,7 +581,7 @@ impl Painter {
     }
 }
 impl epi::NativeTexture for Painter {
-    type Texture = Arc<dyn ImageViewAbstract + Send + Sync>;
+    type Texture = Arc<dyn ImageViewAbstract>;
 
     fn register_native_texture(&mut self, native: Self::Texture) -> TextureId {
         self.register_vulkano_image_view(native)
@@ -660,4 +657,4 @@ fn calc_scissor(
         })
     }
 }
-struct TextureDescriptor(Arc<dyn DescriptorSet + Send + Sync>);
+struct TextureDescriptor(Arc<dyn DescriptorSet>);
