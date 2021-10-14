@@ -7,7 +7,7 @@ use vulkano::pipeline::input_assembly::PrimitiveTopology;
 
 use vulkano::render_pass::{RenderPass, Subpass};
 
-use crate::painter::{EguiVulkanoVertex, PushConstants};
+use crate::painter::{PushConstants, WrappedEguiVertex};
 use crate::render_pass::render_pass_desc_from_format;
 use log::debug;
 use std::ffi::CString;
@@ -51,7 +51,6 @@ pub(crate) fn create_pipeline(
     layout(push_constant) uniform UniformBuffer {
         vec2 u_screen_size;
         bool is_egui_system_texture;
-        float layer;
     };
     */
     let pc_range = Some(PipelineLayoutPcRange {
@@ -172,7 +171,7 @@ pub(crate) fn create_pipeline(
             .viewports_scissors_dynamic(1)
             .render_pass(Subpass::from(render_pass, 0).unwrap())
             .fragment_shader(fs_entry, ())
-            .vertex_input_single_buffer::<EguiVulkanoVertex>()
+            .vertex_input_single_buffer::<WrappedEguiVertex>()
             .vertex_shader(vs_entry, ())
             .primitive_topology(PrimitiveTopology::TriangleList)
             .front_face_clockwise()

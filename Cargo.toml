@@ -13,20 +13,21 @@ readme = "README.md"
 [features]
 backend_debug = []
 [dependencies]
+bytemuck = "1"
 egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master" }
 env_logger = "0.9"
-epi = { git = "https://github.com/emilk/egui.git", branch = "master" }
+epi = { git = "https://github.com/emilk/egui.git", branch = "master"}
+egui ={ git = "https://github.com/emilk/egui.git", branch = "master",features=["convert_bytemuck"]}
 log = "0.4"
 num_cpus = "1"
-once_cell = "1.8"
+
 threadpool = "1"
 vulkano = "^0.26"
 winit = "0.25"
 [dev-dependencies]
 cgmath = "0.18"
 chrono = "0.4"
-
-egui = { git = "https://github.com/emilk/egui.git", branch = "master" }
+once_cell = "1.8"
 egui_demo_lib = { git = "https://github.com/emilk/egui.git", branch = "master", features = ["syntect","ehttp","http","syntax_highlighting"] }
 
 vulkano-win = "^0.26"

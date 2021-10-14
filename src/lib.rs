@@ -14,11 +14,12 @@ use egui::Color32;
 use egui::TextureId;
 //vulkano
 use vulkano::device::{Device, Queue};
-use vulkano::image::view::ImageViewCreationError;
-use vulkano::image::{ImageAccess, ImageCreationError, ImageViewAbstract};
+
+use vulkano::image::{ImageAccess, ImageViewAbstract};
 use vulkano::render_pass::FramebufferAbstract;
 
 use crate::painter::Painter;
+
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
 use vulkano::swapchain::Surface;
@@ -136,7 +137,7 @@ impl EguiVulkanoBackend {
             target,
             clipped_meshes,
             &screen_desc,
-        )
+        );
     }
     /// I extended to any image to write compiz sample
     ///
@@ -187,20 +188,6 @@ impl epi::NativeTexture for EguiVulkanoBackend {
     fn replace_native_texture(&mut self, id: TextureId, replacing: Self::Texture) {
         self.painter.replace_native_texture(id, replacing)
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum RecreateErrors {
-    TextureIdIsEgui,
-    TextureIdNotFound(TextureId),
-    ImageViewCreationError(ImageViewCreationError),
-    ImageCreationError(ImageCreationError),
-}
-
-#[derive(Debug, Clone)]
-pub enum InitRenderAreaError {
-    ImageViewCreationError(ImageViewCreationError),
-    ImageCreationError(ImageCreationError),
 }
 
 pub enum RenderTarget {

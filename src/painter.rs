@@ -7,7 +7,8 @@ use crate::shader::create_pipeline;
 use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
-use crate::{InitRenderAreaError, RecreateErrors, RenderTarget, ScreenDescriptor};
+use crate::{RenderTarget, ScreenDescriptor};
+use log::debug;
 use threadpool::ThreadPool;
 use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
 use vulkano::buffer::{BufferUsage, CpuBufferPool, TypedBufferAccess};
@@ -18,32 +19,17 @@ use vulkano::command_buffer::{
 use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
 use vulkano::descriptor_set::DescriptorSet;
 use vulkano::device::{Device, Queue};
-use vulkano::image::view::{ImageView, ImageViewAbstract};
-#[cfg(feature = "depth_rendering_mode")]
-use vulkano::image::ImageAccess;
-use vulkano::image::{AttachmentImage, ImageAccess, ImageDimensions, ImageUsage, MipmapsCount};
+use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
+use vulkano::image::{
+    AttachmentImage, ImageAccess, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount,
+};
 use vulkano::memory::pool::StdMemoryPool;
-
+use vulkano::pipeline::vertex::{VertexMemberInfo, VertexMemberTy};
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;
-
-/*
-same layout as egui
-so we can cast from Vertex and send it to GPU directly
-memory layout is specified by Vertex trait
-rust's orphan rule we can't use egui::Vertex directly ie . we can't do this
-vulkano::impl_vertex!(egui::epaint::Vertex,pos,uv,color);
-*/
-#[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
-pub(crate) struct EguiVulkanoVertex {
-    a_pos: [f32; 2],
-    a_tex_coord: [f32; 2],
-    a_color: u32,
-}
 #[repr(C)]
 struct IsEguiTextureMarker(u32);
 
@@ -55,11 +41,37 @@ pub(crate) struct PushConstants {
     u_screen_size: [f32; 2],
     marker: IsEguiTextureMarker,
 }
-vulkano::impl_vertex!(EguiVulkanoVertex, a_pos, a_tex_coord, a_color);
+
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub(crate) struct WrappedEguiVertex(epi::egui::epaint::Vertex);
+unsafe impl vulkano::pipeline::vertex::Vertex for WrappedEguiVertex {
+    fn member(name: &str) -> Option<VertexMemberInfo> {
+        let dummy = WrappedEguiVertex(epi::egui::epaint::Vertex::default());
+        match name {
+            "a_pos" => Some(VertexMemberInfo {
+                offset: ((&dummy.0.pos) as *const _ as usize) - ((&dummy) as *const _ as usize),
+                ty: VertexMemberTy::F32,
+                array_size: 2,
+            }),
+            "a_tex_coord" => Some(VertexMemberInfo {
+                offset: ((&dummy.0.uv) as *const _ as usize) - ((&dummy) as *const _ as usize),
+                ty: VertexMemberTy::F32,
+                array_size: 2,
+            }),
+            "a_color" => Some(VertexMemberInfo {
+                offset: ((&dummy.0.color) as *const _ as usize) - ((&dummy) as *const _ as usize),
+                ty: VertexMemberTy::U32,
+                array_size: 1,
+            }),
+            _ => None,
+        }
+    }
+}
 
 struct RenderResource {
     index_buffer: CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>,
-    vertex_buffer: CpuBufferPoolChunk<EguiVulkanoVertex, Arc<StdMemoryPool>>,
+    vertex_buffer: CpuBufferPoolChunk<WrappedEguiVertex, Arc<StdMemoryPool>>,
     texture_id: TextureId,
     scissor: vulkano::pipeline::viewport::Scissor,
     job_id: usize,
@@ -72,10 +84,9 @@ pub struct Painter {
     device: Arc<Device>,
     queue: Arc<Queue>,
     pub(crate) frame_buffers: Vec<Arc<dyn FramebufferAbstract>>,
-    vertex_buffer_pool: CpuBufferPool<EguiVulkanoVertex>,
+    vertex_buffer_pool: CpuBufferPool<WrappedEguiVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
-    //set=0 binding=0
     thread_pool: ThreadPool,
     render_resource_tx: Sender<RenderResource>,
     render_resource_rx: Receiver<RenderResource>,
@@ -94,7 +105,7 @@ TextureId => Option<u64>
 Egui => None
 User(id) => Some(id)
 */
-use log::debug;
+
 impl Painter {
     ///create command builder
     ///
@@ -212,33 +223,27 @@ impl Painter {
                 println!("[BackEnd] Detect glitch mesh");
                 continue;
             }
-
-            let indices = mesh.indices.into_boxed_slice();
-            let vertices = mesh.vertices.into_boxed_slice();
-            let texture_id = mesh.texture_id;
             let index_buffer_pool = self.index_buffer_pool.clone();
             let vertex_buffer_pool = self.vertex_buffer_pool.clone();
-
-            #[cfg(feature = "backend_debug")]
-            println!("[BackEnd] Fission");
-            #[cfg(feature = "backend_debug")]
-            println!(
-                "[BackEnd] mesh {}  vertices {} indices {} texture_id {:?}",
-                job_count,
-                vertices.len(),
-                indices.len(),
-                texture_id
-            );
-            /*
-            safe
-            use same memory layout
-            GPU send only cast
-            */
-            let vertex_slice: Box<[EguiVulkanoVertex]> = unsafe { std::mem::transmute(vertices) };
             let tx = self.render_resource_tx.clone();
             /*Data uploading*/
             self.thread_pool.execute(move || {
-                let index = index_buffer_pool.chunk(indices.iter().copied()).unwrap();
+                let texture_id = mesh.texture_id;
+                #[cfg(feature = "backend_debug")]
+                println!("[BackEnd] Fission");
+                #[cfg(feature = "backend_debug")]
+                println!(
+                    "[BackEnd] mesh {}  vertices {} indices {} texture_id {:?}",
+                    job_count,
+                    mesh.vertices.len(),
+                    mesh.indices.len(),
+                    texture_id
+                );
+                let vertex_slice: &[WrappedEguiVertex] =
+                    bytemuck::cast_slice(mesh.vertices.as_ref());
+                let index = index_buffer_pool
+                    .chunk(mesh.indices.iter().copied())
+                    .unwrap();
                 let vertex = vertex_buffer_pool
                     .chunk(vertex_slice.iter().copied())
                     .unwrap();
@@ -425,9 +430,7 @@ impl Painter {
             size.1,
             srgba_pixels.len()
         );
-        let pixels = unsafe {
-            std::slice::from_raw_parts(srgba_pixels.as_ptr() as *const u8, srgba_pixels.len() * 4)
-        };
+        let pixels = bytemuck::cast_slice(srgba_pixels);
         self.set_texture(id, pixels, (size.0 as u32, size.1 as u32), None);
     }
     /// register vulkano image view as egui texture
@@ -489,28 +492,19 @@ impl Painter {
         format: vulkano::format::Format,
     ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
         let pipeline = self.pipeline.clone();
-        match AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage) {
-            Ok(image) => {
-                let texture_id = self.alloc_user_texture();
-                let t_id = texture_id_as_option_u64(texture_id);
-
-                self.egui_textures
-                    .get_mut(&t_id)
-                    .map(|slot| {
-                        return match ImageView::new(image.clone()) {
-                            Ok(image_view) => {
-                                slot.replace(TextureDescriptor(
-                                    Self::create_descriptor_set_from_view(pipeline, image_view),
-                                ));
-                                Ok((texture_id, image))
-                            }
-                            Err(err) => Err(InitRenderAreaError::ImageViewCreationError(err)),
-                        };
-                    })
-                    .unwrap()
-            }
-            Err(err) => Err(InitRenderAreaError::ImageCreationError(err)),
-        }
+        let image = AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage)?;
+        let texture_id = self.alloc_user_texture();
+        let t_id = texture_id_as_option_u64(texture_id);
+        self.egui_textures
+            .get_mut(&t_id)
+            .map(|slot| {
+                let image_view = ImageView::new(image.clone())?;
+                slot.replace(TextureDescriptor(Self::create_descriptor_set_from_view(
+                    pipeline, image_view,
+                )));
+                Ok((texture_id, image))
+            })
+            .unwrap()
     }
 
     ///  recreate vulkano texture.
@@ -523,35 +517,31 @@ impl Painter {
         texture_id: TextureId,
         dimensions: [u32; 2],
     ) -> Result<Arc<AttachmentImage>, RecreateErrors> {
-        let descriptor_set = self.get_descriptor_set(texture_id);
-        let image_access = descriptor_set.image(0).unwrap().0.image();
-        let format = image_access.format();
-        let usage = image_access.inner().image.usage();
-        let t_id = texture_id_as_option_u64(texture_id);
-        if t_id.is_none() {
-            Err(RecreateErrors::TextureIdIsEgui)
+        let internal_id = texture_id_as_option_u64(texture_id);
+        if let Some(slot) = self.egui_textures.get_mut(&internal_id) {
+            //test we can retrieve format and usage from texture.
+
+            let slot = if let Some(slot) = slot {
+                slot
+            } else {
+                return Err(RecreateErrors::AlreadyFreed);
+            };
+            let image_access = slot.0.image(0).unwrap().0.image();
+            let format = image_access.format();
+            let usage = image_access.inner().image.usage();
+
+            let image =
+                AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage)?;
+            let image_view = ImageView::new(image.clone())?;
+
+            let descriptor =
+                Self::create_descriptor_set_from_view(self.pipeline.clone(), image_view);
+            let texture_desc = TextureDescriptor(descriptor);
+            // register new descriptor set
+            *slot = texture_desc;
+            Ok(image)
         } else {
-            // create image with parameter
-            match AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage) {
-                Ok(image) => {
-                    match ImageView::new(image.clone()) {
-                        Ok(image_view) => {
-                            let descriptor = Self::create_descriptor_set_from_view(
-                                self.pipeline.clone(),
-                                image_view,
-                            );
-                            let texture_desc = TextureDescriptor(descriptor);
-                            // register new descriptor set
-                            if let Some(slot) = self.egui_textures.get_mut(&t_id) {
-                                slot.replace(texture_desc);
-                            }
-                            Ok(image)
-                        }
-                        Err(err) => Err(RecreateErrors::ImageViewCreationError(err)),
-                    }
-                }
-                Err(err) => Err(RecreateErrors::ImageCreationError(err)),
-            }
+            Err(RecreateErrors::TextureIdNotFound)
         }
     }
 }
@@ -632,4 +622,44 @@ fn calc_scissor(
         })
     }
 }
-struct TextureDescriptor(Arc<dyn DescriptorSet>);
+pub(crate) struct TextureDescriptor(Arc<dyn DescriptorSet>);
+pub enum GetDescriptorErrors {
+    InvalidTextureId,
+    FreedSlot,
+}
+
+#[derive(Debug, Clone)]
+pub enum RecreateErrors {
+    TextureIdIsEgui,
+    TextureIdNotFound,
+    AlreadyFreed,
+    ImageViewCreationError(ImageViewCreationError),
+    ImageCreationError(ImageCreationError),
+}
+
+impl From<ImageViewCreationError> for RecreateErrors {
+    fn from(err: ImageViewCreationError) -> Self {
+        Self::ImageViewCreationError(err)
+    }
+}
+impl From<ImageCreationError> for RecreateErrors {
+    fn from(err: ImageCreationError) -> Self {
+        Self::ImageCreationError(err)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum InitRenderAreaError {
+    ImageViewCreationError(ImageViewCreationError),
+    ImageCreationError(ImageCreationError),
+}
+impl From<ImageViewCreationError> for InitRenderAreaError {
+    fn from(err: ImageViewCreationError) -> Self {
+        Self::ImageViewCreationError(err)
+    }
+}
+impl From<ImageCreationError> for InitRenderAreaError {
+    fn from(err: ImageCreationError) -> Self {
+        Self::ImageCreationError(err)
+    }
+}
