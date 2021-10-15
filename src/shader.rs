@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use vulkano::device::Device;
 use vulkano::format::Format;
-use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
+
+use vulkano::pipeline::input_assembly::{InputAssemblyState, PrimitiveTopology};
 
 use vulkano::render_pass::{RenderPass, Subpass};
 
@@ -15,11 +15,18 @@ use vulkano::descriptor_set::layout::{
     DescriptorDesc, DescriptorDescImage, DescriptorDescTy, DescriptorSetDesc,
 };
 use vulkano::image::view::ImageViewType;
+use vulkano::pipeline::color_blend::{
+    AttachmentBlend, BlendFactor, BlendOp, ColorBlendAttachmentState, ColorBlendState,
+    ColorComponents,
+};
+use vulkano::pipeline::depth_stencil::DepthStencilState;
 use vulkano::pipeline::layout::PipelineLayoutPcRange;
+use vulkano::pipeline::rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState};
 use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
 };
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::viewport::ViewportState;
+use vulkano::pipeline::{GraphicsPipeline, StateMode};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
 
 pub(crate) fn create_pipeline(
@@ -168,27 +175,41 @@ pub(crate) fn create_pipeline(
     debug!("renderpass created");
     let pipeline = Arc::new({
         vulkano::pipeline::GraphicsPipeline::start()
-            .viewports_scissors_dynamic(1)
+            .viewport_state(ViewportState::viewport_dynamic_scissor_dynamic(1))
             .render_pass(Subpass::from(render_pass, 0).unwrap())
             .fragment_shader(fs_entry, ())
             .vertex_input_single_buffer::<WrappedEguiVertex>()
             .vertex_shader(vs_entry, ())
-            .primitive_topology(PrimitiveTopology::TriangleList)
-            .front_face_clockwise()
-            .polygon_mode_fill()
-            .depth_stencil_disabled()
-            .blend_collective(AttachmentBlend {
-                enabled: true,
-                color_op: BlendOp::Add,
-                color_source: BlendFactor::One,
-                color_destination: BlendFactor::OneMinusSrcAlpha,
-                alpha_op: BlendOp::Add,
-                alpha_source: BlendFactor::OneMinusDstAlpha,
-                alpha_destination: BlendFactor::One,
-                mask_red: true,
-                mask_green: true,
-                mask_blue: true,
-                mask_alpha: true,
+            .input_assembly_state(
+                InputAssemblyState::new().topology(PrimitiveTopology::TriangleList),
+            )
+            .rasterization_state(
+                RasterizationState::new()
+                    .cull_mode(CullMode::None)
+                    .front_face(FrontFace::CounterClockwise)
+                    .polygon_mode(PolygonMode::Fill),
+            )
+            .depth_stencil_state(DepthStencilState::disabled())
+            .color_blend_state(ColorBlendState {
+                logic_op: None,
+                attachments: vec![ColorBlendAttachmentState {
+                    blend: Some(AttachmentBlend {
+                        color_op: BlendOp::Add,
+                        color_source: BlendFactor::One,
+                        color_destination: BlendFactor::OneMinusSrcAlpha,
+                        alpha_op: BlendOp::Add,
+                        alpha_source: BlendFactor::OneMinusDstAlpha,
+                        alpha_destination: BlendFactor::One,
+                    }),
+                    color_write_mask: ColorComponents {
+                        r: true,
+                        g: true,
+                        b: true,
+                        a: true,
+                    },
+                    color_write_enable: StateMode::Fixed(true),
+                }],
+                blend_constants: StateMode::Fixed([1.0, 1.0, 1.0, 1.0]),
             })
             .build(device)
             .unwrap()

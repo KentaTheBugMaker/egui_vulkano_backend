@@ -18,7 +18,7 @@ use vulkano::pipeline::shader::{
     GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
 };
 use vulkano::pipeline::vertex::BuffersDefinition;
-use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
 use vulkano::render_pass::{
     AttachmentDesc, Framebuffer, FramebufferAbstract, LoadOp, RenderPass, RenderPassDesc, StoreOp,
@@ -30,6 +30,8 @@ use crate::model;
 use crate::model::{Normal, Vertex};
 use vulkano::descriptor_set::layout::{DescriptorDesc, DescriptorDescTy, DescriptorSetDesc};
 use vulkano::descriptor_set::PersistentDescriptorSet;
+use vulkano::pipeline::depth_stencil::DepthStencilState;
+use vulkano::pipeline::input_assembly::{InputAssemblyState, PrimitiveTopology};
 // shader interface definition
 
 //pipeline_layout_desc
@@ -147,10 +149,12 @@ fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
                     .vertex::<Normal>(),
             )
             .vertex_shader(vs_entry, ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
+            .input_assembly_state(
+                InputAssemblyState::new().topology(PrimitiveTopology::TriangleList),
+            )
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
             .fragment_shader(fs_entry, ())
-            .depth_stencil_simple_depth()
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
             .render_pass(Subpass::from(render_pass, 0).unwrap())
             .build(device)
             .unwrap(),
