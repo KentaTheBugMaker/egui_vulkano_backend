@@ -14,20 +14,19 @@ readme = "README.md"
 backend_debug = []
 [dependencies]
 bytemuck = "1"
+egui ={ git = "https://github.com/emilk/egui.git", branch = "master", features = ["convert_bytemuck"] }
 egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master" }
 env_logger = "0.9"
-epi = { git = "https://github.com/emilk/egui.git", branch = "master"}
-egui ={ git = "https://github.com/emilk/egui.git", branch = "master",features=["convert_bytemuck"]}
+epi = { git = "https://github.com/emilk/egui.git", branch = "master" }
 log = "0.4"
 num_cpus = "1"
 
 threadpool = "1"
-vulkano = {git ="https://github.com/vulkano-rs/vulkano.git",branch="master"}
+vulkano = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
 winit = "0.25"
 [dev-dependencies]
 cgmath = "0.18"
 chrono = "0.4"
-once_cell = "1.8"
 egui_demo_lib = { git = "https://github.com/emilk/egui.git", branch = "master", features = ["syntect","ehttp","http","syntax_highlighting"] }
-
-vulkano-win = {git ="https://github.com/vulkano-rs/vulkano.git",branch="master"}
+once_cell = "1.8"
+vulkano-win = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
