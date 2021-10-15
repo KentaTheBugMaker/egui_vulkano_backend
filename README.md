@@ -27,7 +27,7 @@ cargo run --example demo
 ## Known Issue
 
 ## Not Released
-* target egui future release + vulkano 0.26
+* target egui future release + vulkano future release
 * demo changed
 * use official integration `egui_for_winit` like `egui_glium` does
 ## Update v0.14.0 ([Affected version](#stack_overflow_on_debug_build))
@@ -96,24 +96,26 @@ cargo run --example demo
 * [stack over flow on debug build](#stack_overflow_on_debug_build)
 ## Version list
 
-|egui_vulkano_backend|egui |vulkano |vulkano-shader(dependency) |vulkano-win(if use runner)|
-|-----|------|------|------|---|
-|0.0.1|0.10.0|0.20.0|0.20.0|not support|
-|0.0.2|0.10.0|0.20.0|0.20.0|not support|
-|0.0.3|0.10.0|0.21.0|0.21.0|not support|
-|0.0.4|0.10.0|0.21.0|none|not support|
-|0.0.5|0.10.0|0.21.0|none|not support|
-|0.1.0|0.10.0|0.21.0|none|not support|
-|0.2.0|0.10.0|0.21.0|none|not support|
-|0.2.1|0.10.0|0.21.0|none|not support|
-|0.2.2|0.10.0|0.21.0|none|not support|
-|0.3.0|0.10.0|0.22.0|none|0.22.0|
-|0.4.0|0.12.0|0.23.0|none|0.23.0|
-|0.4.1|0.12.0|0.23.0|none|removed|
-|0.5.0|0.12.0|0.24.0|none|removed|
-|0.5.0|0.13|0.24|none|removed|
-|0.6.0|0.13|0.24|none|removed|
-|0.14.0|0.14.0|0.25.0|none|removed|
+|egui_vulkano_backend|egui |vulkano|
+|-----|------|------|
+|0.0.1|0.10.0|0.20.0|
+|0.0.2|0.10.0|0.20.0|
+|0.0.3|0.10.0|0.21.0|
+|0.0.4|0.10.0|0.21.0|
+|0.0.5|0.10.0|0.21.0|
+|0.1.0|0.10.0|0.21.0|
+|0.2.0|0.10.0|0.21.0|
+|0.2.1|0.10.0|0.21.0|
+|0.2.2|0.10.0|0.21.0|
+|0.3.0|0.10.0|0.22.0|
+|0.4.0|0.12.0|0.23.0|
+|0.4.1|0.12.0|0.23.0|
+|0.5.0|0.12.0|0.24.0|
+|0.5.0|0.13|0.24|
+|0.6.0|0.13|0.24|
+|0.14.0|0.14.0|0.25.0|
+|0.15+0.27|0.15|0.27|
+
 ## License
 
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
