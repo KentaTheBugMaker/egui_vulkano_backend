@@ -48,7 +48,7 @@ fn main() {
     ];
     #[cfg(target_os = "macos")]
     let layers = vec!["VK_LAYER_KHRONOS_validation"];
-
+    env_logger::init();
     let required_extensions = vulkano_win::required_extensions();
     static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
     INSTANCE

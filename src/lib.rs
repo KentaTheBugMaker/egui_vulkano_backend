@@ -182,7 +182,7 @@ impl epi::NativeTexture for EguiVulkanoBackend {
     type Texture = Arc<dyn ImageViewAbstract>;
 
     fn register_native_texture(&mut self, native: Self::Texture) -> TextureId {
-        self.painter.register_vulkano_image_view(native)
+        self.painter.register_native_texture(native)
     }
 
     fn replace_native_texture(&mut self, id: TextureId, replacing: Self::Texture) {

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
 use crate::{RenderTarget, ScreenDescriptor};
-use log::debug;
+use log::{debug, info, warn};
 use threadpool::ThreadPool;
 use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
 use vulkano::buffer::{BufferUsage, CpuBufferPool, TypedBufferAccess};
@@ -17,19 +17,21 @@ use vulkano::command_buffer::{
     AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents,
 };
 use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
-use vulkano::descriptor_set::DescriptorSet;
+use vulkano::descriptor_set::{DescriptorSet, DescriptorSetError};
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 use vulkano::image::{
     AttachmentImage, ImageAccess, ImageCreationError, ImageDimensions, ImageUsage, MipmapsCount,
 };
 use vulkano::memory::pool::StdMemoryPool;
+use vulkano::memory::DeviceMemoryAllocError;
 use vulkano::pipeline::vertex::{VertexMemberInfo, VertexMemberTy};
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
 use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;
+
 #[repr(C)]
 struct IsEguiTextureMarker(u32);
 
@@ -80,7 +82,7 @@ struct RenderResource {
 pub struct Painter {
     pipeline: Arc<GraphicsPipeline>,
     egui_texture_version: Option<u64>,
-    egui_textures: BTreeMap<Option<u64>, Option<TextureDescriptor>>,
+    egui_textures: HashMap<TextureId, TextureDescriptor>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     pub(crate) frame_buffers: Vec<Arc<dyn FramebufferAbstract>>,
@@ -92,12 +94,6 @@ pub struct Painter {
     render_resource_rx: Receiver<RenderResource>,
 }
 
-fn texture_id_as_option_u64(x: TextureId) -> Option<u64> {
-    match x {
-        TextureId::Egui => None,
-        TextureId::User(id) => Some(id),
-    }
-}
 /*
 We use Option<u64> as TextureId
 TextureId does not implement Ord trait
@@ -115,20 +111,25 @@ impl Painter {
         queue: Arc<Queue>,
         render_target_format: vulkano::format::Format,
     ) -> Self {
-        debug!("starting painter init");
+        info!("starting painter init");
         let pipeline = create_pipeline(device.clone(), render_target_format);
-        debug!("pipeline created");
+        info!("pipeline created");
         let thread_pool = ThreadPool::new(num_cpus::get());
+        info!("thread pool created");
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
+        info!("vertex buffer pool created");
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
+        info!("index buffer pool created");
         let image_staging_buffer =
             CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
-        let (buffers_tx, buffers_rx) = std::sync::mpsc::channel();
-
+        info!("staging buffer created");
+        let (render_resource_tx, render_resource_rx) = std::sync::mpsc::channel();
+        info!("render resource channel created");
+        info!("painter created");
         Self {
             pipeline,
             egui_texture_version: None,
-            egui_textures: BTreeMap::new(),
+            egui_textures: HashMap::new(),
             device,
             queue,
             frame_buffers: vec![],
@@ -136,8 +137,8 @@ impl Painter {
             index_buffer_pool,
             image_staging_buffer,
             thread_pool,
-            render_resource_tx: buffers_tx,
-            render_resource_rx: buffers_rx,
+            render_resource_tx,
+            render_resource_rx,
         }
     }
 
@@ -185,10 +186,16 @@ impl Painter {
     ) {
         let framebuffer = match render_target {
             RenderTarget::ColorAttachment(color_attachment) => {
-                let fb = Framebuffer::start(self.pipeline.subpass().render_pass().clone())
+                let fbb = Framebuffer::start(self.pipeline.subpass().render_pass().clone())
                     .add(color_attachment)
                     .unwrap();
-                Arc::new(fb.build().expect("[BackEnd] failed to create frame buffer"))
+                let fb = if let Ok(fb) = fbb.build() {
+                    fb
+                } else {
+                    debug!("failed to create frame buffer");
+                    return;
+                };
+                Arc::new(fb)
             }
             RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
         };
@@ -209,18 +216,14 @@ impl Painter {
             .begin_render_pass(framebuffer, SubpassContents::Inline, vec![[0.0; 4].into()])
             .unwrap();
 
-        #[cfg(feature = "backend_debug")]
-        println!("[BackEnd] start frame");
-
-        #[cfg(feature = "backend_debug")]
+        info!("start frame");
         let instant = std::time::Instant::now();
         let mut job_count = 0;
 
         for egui::ClippedMesh(rect, mesh) in paint_jobs {
             let scissor = calc_scissor(rect, *screen_descriptor);
             if mesh.is_empty() || scissor.is_none() {
-                #[cfg(feature = "backend_debug")]
-                println!("[BackEnd] Detect glitch mesh");
+                warn!("Detect glitch mesh");
                 continue;
             }
             let index_buffer_pool = self.index_buffer_pool.clone();
@@ -229,11 +232,9 @@ impl Painter {
             /*Data uploading*/
             self.thread_pool.execute(move || {
                 let texture_id = mesh.texture_id;
-                #[cfg(feature = "backend_debug")]
-                println!("[BackEnd] Fission");
-                #[cfg(feature = "backend_debug")]
-                println!(
-                    "[BackEnd] mesh {}  vertices {} indices {} texture_id {:?}",
+                info!("Fission");
+                info!(
+                    "mesh {}  vertices {} indices {} texture_id {:?}",
                     job_count,
                     mesh.vertices.len(),
                     mesh.indices.len(),
@@ -261,6 +262,13 @@ impl Painter {
         let draw = |render_resource: RenderResource| {
             let texture_id = render_resource.texture_id;
             let texture = self.get_descriptor_set(texture_id);
+            let texture = match texture {
+                Ok(texture) => texture,
+                Err(err) => {
+                    warn!("texture error {:?}", err);
+                    return;
+                }
+            };
             let marker = match texture_id {
                 TextureId::User(_) => IS_USER,
                 _ => IS_EGUI,
@@ -276,7 +284,7 @@ impl Painter {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout().clone(),
                 0,
-                texture,
+                texture.0,
             );
             command_buffer_builder.bind_vertex_buffers(0, render_resource.vertex_buffer);
             command_buffer_builder.bind_index_buffer(render_resource.index_buffer);
@@ -294,15 +302,13 @@ impl Painter {
 
             let mut jobs: Vec<RenderResource> =
                 self.render_resource_rx.iter().take(job_count).collect();
-            #[cfg(feature = "backend_debug")]
-            println!("[BackEnd] upload finished in {:?}", instant.elapsed());
-            #[cfg(feature = "backend_debug")]
-            println!("Fusion {} meshes", job_count);
+            info!("upload finished in {:?}", instant.elapsed());
+            info!("Fusion {} meshes", job_count);
             jobs.sort_by_key(|render_resource| render_resource.job_id);
             let _: Vec<()> = jobs.into_iter().map(draw).collect();
         }
-        #[cfg(feature = "backend_debug")]
-        println!("[BackEnd] end frame");
+
+        info!("end frame");
         command_buffer_builder.end_render_pass().unwrap();
     }
     /// Update egui system texture
@@ -315,64 +321,55 @@ impl Painter {
             texture.height,
             texture.pixels.len()
         );
-        self.set_texture(
+
+        if let Err(err) = self.set_texture(
             TextureId::Egui,
             &texture.pixels,
             (texture.width as u32, texture.height as u32),
             Some(texture.version),
-        )
+        ) {
+            warn!("{:?}", err);
+        }
     }
     #[inline(always)]
-    fn alloc_user_texture(&mut self) -> TextureId {
-        //if we find empty slot
-        //refuse egui system texture
-        if let Some(empty_slot) = self
-            .egui_textures
-            .iter()
-            .find(|entry| entry.0.is_some() && entry.1.is_none())
-        {
-            return TextureId::User(empty_slot.0.unwrap());
-        };
+    fn query_usable_texture_id(&mut self) -> TextureId {
         /*
                 Compatibility for glium backend .
             Because glium's TextureId start from 0.
         */
-        let id = if self.egui_textures.contains_key(&None) {
+        let id = if self.egui_textures.contains_key(&TextureId::Egui) {
             self.egui_textures.len() - 1
         } else {
             self.egui_textures.len()
         };
         //allocate new empty slot
-        self.egui_textures.insert(Some(id as u64), None);
         TextureId::User(id as u64)
     }
     #[inline(always)]
     fn free_user_texture(&mut self, id: TextureId) {
-        let t_id = texture_id_as_option_u64(id);
-        self.egui_textures
-            .get_mut(&t_id)
-            .and_then(|option| option.take());
+        self.egui_textures.remove(&id);
     }
     #[inline(always)]
     fn create_descriptor_set_from_view(
         pipeline: Arc<GraphicsPipeline>,
         image_view: Arc<dyn ImageViewAbstract>,
-    ) -> Arc<dyn DescriptorSet> {
+    ) -> Result<Arc<dyn DescriptorSet>, DescriptorSetError> {
         let mut desc_set_builder =
             PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone());
-        desc_set_builder.add_image(image_view).unwrap();
-        Arc::new(desc_set_builder.build().unwrap())
+        desc_set_builder.add_image(image_view)?;
+        Ok(Arc::new(desc_set_builder.build()?))
     }
     #[inline(always)]
-    fn get_descriptor_set(&self, texture_id: TextureId) -> Arc<dyn DescriptorSet> {
-        let t_id = texture_id_as_option_u64(texture_id);
-        self.egui_textures
-            .get(&t_id)
-            .expect("[BackEnd] invalid Texture ID given")
-            .as_ref()
-            .expect("[BackEnd] access to freed image")
-            .0
-            .clone()
+    fn get_descriptor_set(
+        &self,
+        texture_id: TextureId,
+    ) -> Result<TextureDescriptor, GetDescriptorErrors> {
+        let slot = if let Some(slot) = self.egui_textures.get(&texture_id) {
+            slot
+        } else {
+            return Err(GetDescriptorErrors::InvalidTextureId);
+        };
+        Ok(slot.clone())
     }
     #[inline(always)]
     fn set_texture(
@@ -381,21 +378,18 @@ impl Painter {
         pixels: &[u8],
         size: (u32, u32),
         version: Option<u64>,
-    ) {
+    ) -> Result<(), SetTextureErrors> {
         let format = match id {
             TextureId::Egui => {
                 if self.egui_texture_version == version {
-                    return;
+                    return Ok(());
                 }
                 self.egui_texture_version = version;
                 vulkano::format::Format::R8_UNORM
             }
             TextureId::User(_) => vulkano::format::Format::R8G8B8A8_SRGB,
         };
-        let staging_sub_buffer = self
-            .image_staging_buffer
-            .chunk(pixels.iter().copied())
-            .unwrap();
+        let staging_sub_buffer = self.image_staging_buffer.chunk(pixels.iter().copied())?;
 
         let (image, future) = vulkano::image::ImmutableImage::from_buffer(
             staging_sub_buffer,
@@ -407,15 +401,15 @@ impl Painter {
             MipmapsCount::One,
             format,
             self.queue.clone(),
-        )
-        .unwrap();
-        let t_id = texture_id_as_option_u64(id);
+        )?;
         self.thread_pool.execute(move || future.flush().unwrap());
-        let image_view = ImageView::new(image).unwrap() as Arc<dyn ImageViewAbstract>;
+        let image_view = ImageView::new(image)? as Arc<dyn ImageViewAbstract>;
         let pipeline = self.pipeline.clone();
-        let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view);
+        let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view)?;
+
         self.egui_textures
-            .insert(t_id, Some(TextureDescriptor(texture_desc)));
+            .insert(id, TextureDescriptor(texture_desc));
+        Ok(())
     }
     pub fn set_user_texture(
         &mut self,
@@ -431,7 +425,9 @@ impl Painter {
             srgba_pixels.len()
         );
         let pixels = bytemuck::cast_slice(srgba_pixels);
-        self.set_texture(id, pixels, (size.0 as u32, size.1 as u32), None);
+        if let Err(err) = self.set_texture(id, pixels, (size.0 as u32, size.1 as u32), None) {
+            warn!("{:?}", err)
+        }
     }
     /// register vulkano image view as egui texture
     ///
@@ -440,16 +436,16 @@ impl Painter {
     pub fn register_vulkano_image_view(
         &mut self,
         image_view: Arc<dyn ImageViewAbstract>,
-    ) -> TextureId {
-        let id = self.alloc_user_texture();
-        let t_id = texture_id_as_option_u64(id);
-        if let Some(slot) = self.egui_textures.get_mut(&t_id) {
-            slot.replace(TextureDescriptor(Self::create_descriptor_set_from_view(
+    ) -> Result<TextureId, DescriptorSetError> {
+        let id = self.query_usable_texture_id();
+        self.egui_textures.insert(
+            id,
+            TextureDescriptor(Self::create_descriptor_set_from_view(
                 self.pipeline.clone(),
                 image_view,
-            )));
-        }
-        id
+            )?),
+        );
+        Ok(id)
     }
     /// init render area with given dimensions.
     ///
@@ -460,7 +456,7 @@ impl Painter {
     /// * color_attachment
     /// * transfer_destination
     ///
-    ///  this is shortcut function for register_vulkano_image_view
+    ///  this is shortcut function for init_vulkano_image_with_parameter
     ///
     /// example usage
     /// * model viewer
@@ -468,7 +464,7 @@ impl Painter {
     pub fn init_vulkano_image_with_dimensions(
         &mut self,
         dimensions: [u32; 2],
-    ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
+    ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaErrors> {
         let usage = ImageUsage {
             transfer_source: false,
             transfer_destination: true,
@@ -485,47 +481,40 @@ impl Painter {
             vulkano::format::Format::R8G8B8A8_SRGB,
         )
     }
+    /// init render area with given dimensions , format and usage.
+    ///
+    /// always allocate new or freed slot for image
     pub fn init_vulkano_image_with_parameters(
         &mut self,
         dimensions: [u32; 2],
         usage: ImageUsage,
         format: vulkano::format::Format,
-    ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaError> {
+    ) -> Result<(TextureId, Arc<AttachmentImage>), InitRenderAreaErrors> {
         let pipeline = self.pipeline.clone();
         let image = AttachmentImage::with_usage(self.device.clone(), dimensions, format, usage)?;
-        let texture_id = self.alloc_user_texture();
-        let t_id = texture_id_as_option_u64(texture_id);
-        self.egui_textures
-            .get_mut(&t_id)
-            .map(|slot| {
-                let image_view = ImageView::new(image.clone())?;
-                slot.replace(TextureDescriptor(Self::create_descriptor_set_from_view(
-                    pipeline, image_view,
-                )));
-                Ok((texture_id, image))
-            })
-            .unwrap()
+        let texture_id = self.query_usable_texture_id();
+        let image_view = ImageView::new(image.clone())?;
+        let texture_desc =
+            TextureDescriptor(Self::create_descriptor_set_from_view(pipeline, image_view)?);
+        self.egui_textures.insert(texture_id, texture_desc);
+        Ok((texture_id, image))
     }
 
     ///  recreate vulkano texture.
     ///
     ///  usable for render target resize.
     ///
-    ///  this function create descriptor set for image, so you do not have to call [register_vulkano_image_view]
+    /// this is similar to Swapchain::recreate
+    ///
+    ///  this function recreate descriptor set for image, so you do not have to call [register_vulkano_image_view]
     pub fn recreate_vulkano_texture_with_dimensions(
         &mut self,
         texture_id: TextureId,
         dimensions: [u32; 2],
     ) -> Result<Arc<AttachmentImage>, RecreateErrors> {
-        let internal_id = texture_id_as_option_u64(texture_id);
-        if let Some(slot) = self.egui_textures.get_mut(&internal_id) {
-            //test we can retrieve format and usage from texture.
-
-            let slot = if let Some(slot) = slot {
-                slot
-            } else {
-                return Err(RecreateErrors::AlreadyFreed);
-            };
+        //test we can retrieve format and usage from texture.
+        if let Some(slot) = self.egui_textures.get_mut(&texture_id) {
+            //we use  descriptor set that contains only Image so we can use unwrap without any risk.
             let image_access = slot.0.image(0).unwrap().0.image();
             let format = image_access.format();
             let usage = image_access.inner().image.usage();
@@ -536,7 +525,7 @@ impl Painter {
 
             let descriptor =
                 Self::create_descriptor_set_from_view(self.pipeline.clone(), image_view);
-            let texture_desc = TextureDescriptor(descriptor);
+            let texture_desc = TextureDescriptor(descriptor?);
             // register new descriptor set
             *slot = texture_desc;
             Ok(image)
@@ -550,15 +539,18 @@ impl epi::NativeTexture for Painter {
 
     fn register_native_texture(&mut self, native: Self::Texture) -> TextureId {
         self.register_vulkano_image_view(native)
+            .expect("DescriptorSetError occurred in backend")
     }
 
     fn replace_native_texture(&mut self, id: TextureId, replacing: Self::Texture) {
-        if let egui::TextureId::User(x) = id {
-            self.egui_textures
-                .get_mut(&Some(x))
-                .replace(&mut Some(TextureDescriptor(
-                    Self::create_descriptor_set_from_view(self.pipeline.clone(), replacing),
-                )));
+        if id != TextureId::Egui {
+            self.egui_textures.insert(
+                id,
+                TextureDescriptor(
+                    Self::create_descriptor_set_from_view(self.pipeline.clone(), replacing)
+                        .expect("DescriptorSetError occurred in backend"),
+                ),
+            );
         }
     }
 }
@@ -568,7 +560,7 @@ impl epi::TextureAllocator for Painter {
         size: (usize, usize),
         srgba_pixels: &[Color32],
     ) -> TextureId {
-        let id = self.alloc_user_texture();
+        let id = self.query_usable_texture_id();
         self.set_user_texture(id, size, srgba_pixels);
         id
     }
@@ -608,9 +600,8 @@ fn calc_scissor(
     let clip_max_y = clip_max_y.round() as u32;
     let width = clip_max_x - clip_min_x;
     let height = clip_max_y - clip_min_y;
-    #[cfg(feature = "backend_debug")]
-    println!(
-        "[BackEnd] clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
+    info!(
+        " clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
         clip_min_x, clip_min_y, width, height
     );
     if (width == 0) | (height == 0) {
@@ -622,7 +613,9 @@ fn calc_scissor(
         })
     }
 }
+#[derive(Clone)]
 pub(crate) struct TextureDescriptor(Arc<dyn DescriptorSet>);
+#[derive(Debug)]
 pub enum GetDescriptorErrors {
     InvalidTextureId,
     FreedSlot,
@@ -633,33 +626,72 @@ pub enum RecreateErrors {
     TextureIdIsEgui,
     TextureIdNotFound,
     AlreadyFreed,
-    ImageViewCreationError(ImageViewCreationError),
-    ImageCreationError(ImageCreationError),
+    ImageViewCreation(ImageViewCreationError),
+    ImageCreation(ImageCreationError),
+    DesciptorSet(DescriptorSetError),
 }
-
+impl From<DescriptorSetError> for RecreateErrors {
+    fn from(err: DescriptorSetError) -> Self {
+        Self::DesciptorSet(err)
+    }
+}
 impl From<ImageViewCreationError> for RecreateErrors {
     fn from(err: ImageViewCreationError) -> Self {
-        Self::ImageViewCreationError(err)
+        Self::ImageViewCreation(err)
     }
 }
 impl From<ImageCreationError> for RecreateErrors {
     fn from(err: ImageCreationError) -> Self {
-        Self::ImageCreationError(err)
+        Self::ImageCreation(err)
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum InitRenderAreaError {
+pub enum InitRenderAreaErrors {
     ImageViewCreationError(ImageViewCreationError),
     ImageCreationError(ImageCreationError),
+    DescriptorSetError(DescriptorSetError),
 }
-impl From<ImageViewCreationError> for InitRenderAreaError {
+
+impl From<DescriptorSetError> for InitRenderAreaErrors {
+    fn from(err: DescriptorSetError) -> Self {
+        InitRenderAreaErrors::DescriptorSetError(err)
+    }
+}
+impl From<ImageViewCreationError> for InitRenderAreaErrors {
     fn from(err: ImageViewCreationError) -> Self {
         Self::ImageViewCreationError(err)
     }
 }
-impl From<ImageCreationError> for InitRenderAreaError {
+impl From<ImageCreationError> for InitRenderAreaErrors {
     fn from(err: ImageCreationError) -> Self {
         Self::ImageCreationError(err)
+    }
+}
+#[derive(Debug)]
+pub(crate) enum SetTextureErrors {
+    ImageCreation(ImageCreationError),
+    DeviceMemoryAlloc(DeviceMemoryAllocError),
+    ImageViewCreation(ImageViewCreationError),
+    DescriptorSet(DescriptorSetError),
+}
+impl From<ImageViewCreationError> for SetTextureErrors {
+    fn from(err: ImageViewCreationError) -> Self {
+        Self::ImageViewCreation(err)
+    }
+}
+impl From<DescriptorSetError> for SetTextureErrors {
+    fn from(err: DescriptorSetError) -> Self {
+        Self::DescriptorSet(err)
+    }
+}
+impl From<ImageCreationError> for SetTextureErrors {
+    fn from(err: ImageCreationError) -> Self {
+        Self::ImageCreation(err)
+    }
+}
+impl From<DeviceMemoryAllocError> for SetTextureErrors {
+    fn from(err: DeviceMemoryAllocError) -> Self {
+        Self::DeviceMemoryAlloc(err)
     }
 }
