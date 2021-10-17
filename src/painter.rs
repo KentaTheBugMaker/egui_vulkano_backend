@@ -234,7 +234,7 @@ impl Painter {
                 let texture_id = mesh.texture_id;
                 info!("Fission");
                 info!(
-                    "mesh {}  vertices {} indices {} texture_id {:?}",
+                    "mesh {} vertices {} indices {} texture_id {:?}",
                     job_count,
                     mesh.vertices.len(),
                     mesh.indices.len(),
@@ -512,6 +512,9 @@ impl Painter {
         texture_id: TextureId,
         dimensions: [u32; 2],
     ) -> Result<Arc<AttachmentImage>, RecreateErrors> {
+        if texture_id == TextureId::Egui {
+            return Err(RecreateErrors::TextureIdIsEgui);
+        }
         //test we can retrieve format and usage from texture.
         if let Some(slot) = self.egui_textures.get_mut(&texture_id) {
             //we use  descriptor set that contains only Image so we can use unwrap without any risk.
@@ -601,7 +604,7 @@ fn calc_scissor(
     let width = clip_max_x - clip_min_x;
     let height = clip_max_y - clip_min_y;
     info!(
-        " clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
+        "clip_rectangle min_x : {} min_y : {} width :{} height : {} ",
         clip_min_x, clip_min_y, width, height
     );
     if (width == 0) | (height == 0) {
@@ -625,14 +628,13 @@ pub enum GetDescriptorErrors {
 pub enum RecreateErrors {
     TextureIdIsEgui,
     TextureIdNotFound,
-    AlreadyFreed,
     ImageViewCreation(ImageViewCreationError),
     ImageCreation(ImageCreationError),
-    DesciptorSet(DescriptorSetError),
+    DescriptorSet(DescriptorSetError),
 }
 impl From<DescriptorSetError> for RecreateErrors {
     fn from(err: DescriptorSetError) -> Self {
-        Self::DesciptorSet(err)
+        Self::DescriptorSet(err)
     }
 }
 impl From<ImageViewCreationError> for RecreateErrors {
