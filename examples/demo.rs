@@ -116,6 +116,8 @@ fn main() {
 
     let mut previous_frame_time = None;
     let mut demo_app = egui_demo_lib::WrapApp::default();
+    //
+    let mut invalid_dimension_flag = false;
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             egui.begin_frame();
@@ -149,20 +151,22 @@ fn main() {
             };
 
             {
+                if invalid_dimension_flag {
+                    return;
+                }
                 let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
                 previous_frame_end.as_mut().unwrap().cleanup_finished();
-
-                let (image_num, suboptimal, acquire_future) =
+                let (image_num, _, acquire_future) =
                     match swapchain::acquire_next_image(swapchain.clone(), None) {
+                        Ok((_, true, _)) => {
+                            return;
+                        }
                         Ok(r) => r,
                         Err(AcquireError::OutOfDate) => {
                             return;
                         }
                         Err(e) => panic!("Failed to acquire next image: {:?}", e),
                     };
-                if suboptimal {
-                    return;
-                }
                 let mut render_command = AutoCommandBufferBuilder::primary(
                     device.clone(),
                     queue_family,
@@ -187,14 +191,20 @@ fn main() {
                 ..
             } => {
                 let dimensions: [u32; 2] = size.into();
-                let (new_swapchain, new_images) =
-                    match swapchain.recreate().dimensions(dimensions).build() {
-                        Ok(r) => r,
-                        Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                        Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                    };
-                swapchain = new_swapchain;
-                egui.create_frame_buffers(&new_images);
+                // validate extent for avoid vulkan validation error
+                if 0 < dimensions[0] && 0 < dimensions[1] {
+                    let (new_swapchain, new_images) =
+                        match swapchain.recreate().dimensions(dimensions).build() {
+                            Ok(r) => r,
+                            Err(SwapchainCreationError::UnsupportedDimensions) => return,
+                            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                        };
+                    swapchain = new_swapchain;
+                    egui.create_frame_buffers(&new_images);
+                    invalid_dimension_flag = false;
+                } else {
+                    invalid_dimension_flag = true;
+                }
             }
             winit::event::Event::WindowEvent { event, .. } => {
                 if egui.is_quit_event(&event) {

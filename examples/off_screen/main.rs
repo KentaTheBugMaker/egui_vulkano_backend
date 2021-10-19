@@ -11,7 +11,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-use egui_vulkano_backend::{EguiVulkanoBackend, ScreenDescriptor};
+use egui_vulkano_backend::EguiVulkanoBackend;
 
 use crate::renderer::TeapotRenderer;
 use once_cell::sync::OnceCell;
@@ -105,15 +105,11 @@ fn main() {
     let mut teapot_renderer = TeapotRenderer::new(device.clone(), queue);
     //set render target
     teapot_renderer.set_render_target(render_target.clone());
-    let mut screen_descriptor = ScreenDescriptor {
-        physical_width: size.width,
-        physical_height: size.height,
-        scale_factor: surface.window().scale_factor() as f32,
-    };
     let mut rotate = 0.0;
     let mut height_percent = 0.7;
     let mut image_size = [size.width as f32, size.height as f32 * height_percent];
     let mut needs_to_resize_teapot_rt = false;
+    let mut invalid_dimension_flag = false;
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             // Begin to draw the UI frame.
@@ -152,12 +148,17 @@ fn main() {
             } else {
                 winit::event_loop::ControlFlow::Wait
             };
-
+            if invalid_dimension_flag {
+                return;
+            }
             let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
             previous_frame_end.as_mut().unwrap().cleanup_finished();
 
-            let (image_num, suboptimal, acquire_future) =
+            let (image_num, _, acquire_future) =
                 match swapchain::acquire_next_image(swapchain.clone(), None) {
+                    Ok((_, true, _)) => {
+                        return;
+                    }
                     Ok(r) => r,
                     Err(AcquireError::OutOfDate) => {
                         return;
@@ -165,9 +166,6 @@ fn main() {
                     Err(e) => panic!("Failed to acquire next image: {:?}", e),
                 };
 
-            if suboptimal {
-                return;
-            }
             if needs_to_resize_teapot_rt {
                 needs_to_resize_teapot_rt = false;
                 let size = surface.window().inner_size();
@@ -197,19 +195,22 @@ fn main() {
                 event: WindowEvent::Resized(size),
                 ..
             } => {
-                match swapchain.recreate().dimensions(size.into()).build() {
-                    Ok(r) => {
-                        swapchain = r.0;
-                        egui.create_frame_buffers(&r.1);
+                let dimensions: [u32; 2] = size.into();
+                if 0 < dimensions[0] && 0 < dimensions[1] {
+                    match swapchain.recreate().dimensions(dimensions).build() {
+                        Ok(r) => {
+                            swapchain = r.0;
+                            egui.create_frame_buffers(&r.1);
+                        }
+                        Err(SwapchainCreationError::UnsupportedDimensions) => return,
+                        Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                     }
-                    Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                    Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                    //resize render_target
+                    needs_to_resize_teapot_rt = true;
+                    invalid_dimension_flag = false;
+                } else {
+                    invalid_dimension_flag = true;
                 }
-                //resize render_target
-                needs_to_resize_teapot_rt = true;
-                //set screen descriptor
-                screen_descriptor.physical_height = size.height;
-                screen_descriptor.physical_width = size.width;
             }
 
             winit::event::Event::WindowEvent { event, .. } => {
