@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use chrono::Timelike;
-
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
 use vulkano::instance::Instance;
@@ -122,10 +120,10 @@ fn main() {
             let ctx = egui.ctx().clone();
             let mut frame = epi::backend::FrameBuilder {
                 info: IntegrationInfo {
+                    name: "egui_vulkano_backend",
                     web_info: None,
                     prefer_dark_mode: None,
                     cpu_usage: previous_frame_time,
-                    seconds_since_midnight: Some(seconds_since_midnight()),
                     native_pixels_per_point: Some(egui.pixels_per_point()),
                 },
                 tex_allocator: &mut egui,
@@ -209,10 +207,4 @@ fn main() {
             _ => (),
         }
     });
-}
-
-/// Time of day as seconds since midnight. Used for clock in demo app.
-pub fn seconds_since_midnight() -> f64 {
-    let time = chrono::Local::now().time();
-    time.num_seconds_from_midnight() as f64 + 1e-9 * (time.nanosecond() as f64)
 }
