@@ -19,9 +19,7 @@ egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master" }
 env_logger = "0.9"
 epi = { git = "https://github.com/emilk/egui.git", branch = "master" }
 log = "0.4"
-num_cpus = "1"
-
-threadpool = "1"
+rayon ="1"
 vulkano = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
 winit = "0.25"
 [dev-dependencies]

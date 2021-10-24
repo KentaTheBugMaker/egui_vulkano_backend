@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
 use crate::shader::create_pipeline;
@@ -9,7 +8,7 @@ use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
 use crate::{RenderTarget, ScreenDescriptor};
 use log::{debug, info, warn};
-use threadpool::ThreadPool;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
 use vulkano::buffer::{BufferUsage, CpuBufferPool, TypedBufferAccess};
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
@@ -89,18 +88,7 @@ pub struct Painter {
     vertex_buffer_pool: CpuBufferPool<WrappedEguiVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
-    thread_pool: ThreadPool,
-    render_resource_tx: Sender<RenderResource>,
-    render_resource_rx: Receiver<RenderResource>,
 }
-
-/*
-We use Option<u64> as TextureId
-TextureId does not implement Ord trait
-TextureId => Option<u64>
-Egui => None
-User(id) => Some(id)
-*/
 
 impl Painter {
     ///create command builder
@@ -114,8 +102,6 @@ impl Painter {
         info!("starting painter init");
         let pipeline = create_pipeline(device.clone(), render_target_format);
         info!("pipeline created");
-        let thread_pool = ThreadPool::new(num_cpus::get());
-        info!("thread pool created");
         let vertex_buffer_pool = CpuBufferPool::vertex_buffer(device.clone());
         info!("vertex buffer pool created");
         let index_buffer_pool = CpuBufferPool::new(device.clone(), BufferUsage::index_buffer());
@@ -123,8 +109,7 @@ impl Painter {
         let image_staging_buffer =
             CpuBufferPool::new(device.clone(), BufferUsage::transfer_source());
         info!("staging buffer created");
-        let (render_resource_tx, render_resource_rx) = std::sync::mpsc::channel();
-        info!("render resource channel created");
+
         info!("painter created");
         Self {
             pipeline,
@@ -136,9 +121,6 @@ impl Painter {
             vertex_buffer_pool,
             index_buffer_pool,
             image_staging_buffer,
-            thread_pool,
-            render_resource_tx,
-            render_resource_rx,
         }
     }
 
@@ -218,47 +200,56 @@ impl Painter {
 
         info!("start frame");
         let instant = std::time::Instant::now();
-        let mut job_count = 0;
 
-        for egui::ClippedMesh(rect, mesh) in paint_jobs {
-            let scissor = calc_scissor(rect, *screen_descriptor);
-            if mesh.is_empty() || scissor.is_none() {
-                warn!("Detect glitch mesh");
-                continue;
-            }
-            let index_buffer_pool = self.index_buffer_pool.clone();
-            let vertex_buffer_pool = self.vertex_buffer_pool.clone();
-            let tx = self.render_resource_tx.clone();
-            /*Data uploading*/
-            self.thread_pool.execute(move || {
-                let texture_id = mesh.texture_id;
-                info!("Fission");
-                info!(
-                    "mesh {} vertices {} indices {} texture_id {:?}",
-                    job_count,
-                    mesh.vertices.len(),
-                    mesh.indices.len(),
-                    texture_id
-                );
-                let vertex_slice: &[WrappedEguiVertex] =
-                    bytemuck::cast_slice(mesh.vertices.as_ref());
-                let index = index_buffer_pool
-                    .chunk(mesh.indices.iter().copied())
-                    .unwrap();
-                let vertex = vertex_buffer_pool
-                    .chunk(vertex_slice.iter().copied())
-                    .unwrap();
-                tx.send(RenderResource {
-                    index_buffer: index,
-                    vertex_buffer: vertex,
-                    texture_id,
-                    scissor: scissor.unwrap(),
-                    job_id: job_count,
-                })
-                .unwrap();
-            });
-            job_count += 1;
-        }
+        let job_count = paint_jobs.len();
+        let mut jobs: Vec<_> = paint_jobs
+            .into_iter()
+            .enumerate()
+            .par_bridge()
+            .map(
+                |(job_id, ClippedMesh(rect, mesh))| -> Option<RenderResource> {
+                    let scissor = calc_scissor(rect, *screen_descriptor);
+                    match (mesh.is_empty(), scissor) {
+                        (true, _) | (_, None) => {
+                            warn!("Detect glitch mesh");
+                            None
+                        }
+                        (_, Some(scissor)) => {
+                            let texture_id = mesh.texture_id;
+                            info!("Fission");
+                            info!(
+                                "mesh {} vertices {} indices {} texture_id {:?}",
+                                job_id,
+                                mesh.vertices.len(),
+                                mesh.indices.len(),
+                                texture_id
+                            );
+                            let vertex_slice: &[WrappedEguiVertex] =
+                                bytemuck::cast_slice(mesh.vertices.as_ref());
+                            let index = self
+                                .index_buffer_pool
+                                .clone()
+                                .chunk(mesh.indices.iter().copied())
+                                .unwrap();
+                            let vertex = self
+                                .vertex_buffer_pool
+                                .clone()
+                                .chunk(vertex_slice.iter().copied())
+                                .unwrap();
+                            Some(RenderResource {
+                                index_buffer: index,
+                                vertex_buffer: vertex,
+                                texture_id,
+                                scissor,
+                                job_id,
+                            })
+                        }
+                    }
+                },
+            )
+            .filter_map(|resource| resource)
+            .collect();
+
         let draw = |render_resource: RenderResource| {
             let texture_id = render_resource.texture_id;
             let texture = self.get_descriptor_set(texture_id);
@@ -299,13 +290,10 @@ impl Painter {
                 To avoid image flicker , We sort by job id
                 We must take job_counts commands to avoid blocking
             */
-
-            let mut jobs: Vec<RenderResource> =
-                self.render_resource_rx.iter().take(job_count).collect();
             info!("upload finished in {:?}", instant.elapsed());
             info!("Fusion {} meshes", job_count);
             jobs.sort_by_key(|render_resource| render_resource.job_id);
-            let _: Vec<()> = jobs.into_iter().map(draw).collect();
+            jobs.into_iter().for_each(draw);
         }
 
         info!("end frame");
@@ -402,7 +390,7 @@ impl Painter {
             format,
             self.queue.clone(),
         )?;
-        self.thread_pool.execute(move || future.flush().unwrap());
+        future.flush().unwrap();
         let image_view = ImageView::new(image)? as Arc<dyn ImageViewAbstract>;
         let pipeline = self.pipeline.clone();
         let texture_desc = Self::create_descriptor_set_from_view(pipeline, image_view)?;
