@@ -1,6 +1,6 @@
 [package]
 name = "egui_vulkano_backend"
-version = "0.14.0"
+version = "0.15.0+vulkano0.26"
 authors = ["t18b219k <t18b219k@mail.cc.niigata-u.ac.jp>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -14,10 +14,10 @@ readme = "README.md"
 backend_debug = []
 [dependencies]
 bytemuck = "1"
+egui ={ version = "0.15", features = ["convert_bytemuck"] }
 egui-winit = "0.15"
 env_logger = "0.9"
-epi = { version="0.15"}
-egui ={ version="0.15",features=["convert_bytemuck"]}
+epi = { version = "0.15" }
 log = "0.4"
 num_cpus = "1"
 
@@ -27,7 +27,7 @@ winit = "0.25"
 [dev-dependencies]
 cgmath = "0.18"
 chrono = "0.4"
+egui_demo_lib = { version = "0.15", features = ["syntect","ehttp","http","syntax_highlighting"] }
 once_cell = "1.8"
-egui_demo_lib = {version="0.15", features = ["syntect","ehttp","http","syntax_highlighting"] }
 
 vulkano-win = "^0.26"

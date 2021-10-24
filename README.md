@@ -26,8 +26,8 @@ cargo run --example demo
 ```
 ## Known Issue
 
-## Not Released
-* target egui future release + vulkano 0.26
+## Update v0.15+vulkano0.26
+* target egui 0.15+ vulkano 0.26
 * demo changed
 * use official integration `egui_for_winit` like `egui_glium` does
 ## Update v0.14.0 ([Affected version](#stack_overflow_on_debug_build))
@@ -114,6 +114,8 @@ cargo run --example demo
 |0.5.0|0.13|0.24|none|removed|
 |0.6.0|0.13|0.24|none|removed|
 |0.14.0|0.14.0|0.25.0|none|removed|
+|0.15+vulkano0.26|0.15|0.26|none|removed|
+
 ## License
 
 egui_vulkano_backend is distributed under the terms of both the MIT license, and the Apache License (Version 2.0).
