@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use chrono::Timelike;
-
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::ImageUsage;
 use vulkano::instance::Instance;
