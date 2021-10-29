@@ -11,9 +11,7 @@ use crate::painter::{PushConstants, WrappedEguiVertex};
 use crate::render_pass::render_pass_desc_from_format;
 use log::debug;
 use std::ffi::CString;
-use vulkano::descriptor_set::layout::{
-    DescriptorDesc, DescriptorDescImage, DescriptorDescTy, DescriptorSetDesc,
-};
+use vulkano::descriptor_set::layout::DescriptorType;
 use vulkano::image::view::ImageViewType;
 use vulkano::pipeline::color_blend::{
     AttachmentBlend, BlendFactor, BlendOp, ColorBlendAttachmentState, ColorBlendState,
@@ -23,7 +21,8 @@ use vulkano::pipeline::depth_stencil::DepthStencilState;
 use vulkano::pipeline::layout::PipelineLayoutPcRange;
 use vulkano::pipeline::rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState};
 use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
+    DescriptorRequirements, GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry,
+    ShaderModule, ShaderStages,
 };
 use vulkano::pipeline::viewport::ViewportState;
 use vulkano::pipeline::{GraphicsPipeline, StateMode};
@@ -72,29 +71,6 @@ pub(crate) fn create_pipeline(
             compute: false,
         },
     });
-
-    let descriptor_set_desc_0 = DescriptorSetDesc::new(vec![Some(DescriptorDesc {
-        ty: DescriptorDescTy::CombinedImageSampler {
-            image_desc: DescriptorDescImage {
-                format: None,
-                multisampled: false,
-                view_type: ImageViewType::Dim2d,
-            },
-            immutable_samplers: vec![sampler],
-        },
-        descriptor_count: 1,
-        stages: ShaderStages {
-            vertex: false,
-            tessellation_control: false,
-            tessellation_evaluation: false,
-            geometry: false,
-            fragment: true,
-            compute: false,
-        },
-        variable_count: false,
-        mutable: false,
-    })]);
-    let descriptor_sets = vec![descriptor_set_desc_0];
     /*
         # SAFETY
         [x] one entry per location
@@ -140,11 +116,12 @@ pub(crate) fn create_pipeline(
             name: Some(std::borrow::Cow::Borrowed("f_color")),
         }])
     };
+
     let spec = &[];
     let vs_entry = unsafe {
         vs_module.graphics_entry_point(
             &main,
-            descriptor_sets.clone(),
+            [],
             pc_range,
             spec,
             vs_in,
@@ -156,7 +133,21 @@ pub(crate) fn create_pipeline(
     let fs_entry = unsafe {
         fs_module.graphics_entry_point(
             &main,
-            descriptor_sets,
+            [(
+                (0, 0),
+                DescriptorRequirements {
+                    descriptor_types: vec![DescriptorType::CombinedImageSampler],
+                    descriptor_count: 1,
+                    format: None,
+                    image_view_type: Some(ImageViewType::Dim2d),
+                    multisampled: false,
+                    mutable: false,
+                    stages: ShaderStages {
+                        fragment: true,
+                        ..Default::default()
+                    },
+                },
+            )],
             pc_range,
             spec,
             vs_out,
@@ -171,7 +162,6 @@ pub(crate) fn create_pipeline(
         )
         .unwrap(),
     );
-
     debug!("renderpass created");
     let pipeline = Arc::new({
         vulkano::pipeline::GraphicsPipeline::start()
@@ -211,7 +201,9 @@ pub(crate) fn create_pipeline(
                 }],
                 blend_constants: StateMode::Fixed([1.0, 1.0, 1.0, 1.0]),
             })
-            .build(device)
+            .with_auto_layout(device, |x| {
+                x[0].set_immutable_samplers(0, [sampler]);
+            })
             .unwrap()
     });
     debug!("pipeline created");

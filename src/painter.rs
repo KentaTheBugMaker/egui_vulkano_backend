@@ -16,7 +16,7 @@ use vulkano::command_buffer::{
     AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents,
 };
 use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
-use vulkano::descriptor_set::{DescriptorSet, DescriptorSetError};
+use vulkano::descriptor_set::{DescriptorBindingResources, DescriptorSet, DescriptorSetError};
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 use vulkano::image::{
@@ -367,6 +367,7 @@ impl Painter {
         size: (u32, u32),
         version: Option<u64>,
     ) -> Result<(), SetTextureErrors> {
+        info!("trying to upload {:?}", id);
         let format = match id {
             TextureId::Egui => {
                 if self.egui_texture_version == version {
@@ -506,7 +507,22 @@ impl Painter {
         //test we can retrieve format and usage from texture.
         if let Some(slot) = self.egui_textures.get_mut(&texture_id) {
             //we use  descriptor set that contains only Image so we can use unwrap without any risk.
-            let image_access = slot.0.image(0).unwrap().0.image();
+            let resources = slot.0.resources().binding(0);
+            let x = if let Some(resources) = resources {
+                match resources {
+                    DescriptorBindingResources::ImageView(x) => {
+                        Some(x.iter().next().unwrap().as_ref().unwrap().clone())
+                    }
+                    DescriptorBindingResources::ImageViewSampler(x) => {
+                        Some(x.iter().next().unwrap().as_ref().unwrap().0.clone())
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let iva = x.clone().unwrap();
+            let image_access = iva.image();
             let format = image_access.format();
             let usage = image_access.inner().image.usage();
 

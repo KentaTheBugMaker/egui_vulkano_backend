@@ -15,7 +15,8 @@ use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
 
 use vulkano::pipeline::shader::{
-    GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry, ShaderModule, ShaderStages,
+    DescriptorRequirements, GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry,
+    ShaderModule, ShaderStages,
 };
 use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Viewport, ViewportState};
@@ -28,29 +29,10 @@ use vulkano::sync::GpuFuture;
 
 use crate::model;
 use crate::model::{Normal, Vertex};
-use vulkano::descriptor_set::layout::{DescriptorDesc, DescriptorDescTy, DescriptorSetDesc};
+use vulkano::descriptor_set::layout::DescriptorType;
 use vulkano::descriptor_set::PersistentDescriptorSet;
 use vulkano::pipeline::depth_stencil::DepthStencilState;
 use vulkano::pipeline::input_assembly::{InputAssemblyState, PrimitiveTopology};
-// shader interface definition
-
-//pipeline_layout_desc
-fn create_descriptor_set_desc() -> DescriptorSetDesc {
-    DescriptorSetDesc::new(vec![Some(DescriptorDesc {
-        ty: DescriptorDescTy::UniformBuffer,
-        descriptor_count: 1,
-        stages: ShaderStages {
-            vertex: true,
-            tessellation_control: false,
-            tessellation_evaluation: false,
-            geometry: false,
-            fragment: false,
-            compute: false,
-        },
-        variable_count: false,
-        mutable: false,
-    })])
-}
 
 //render pass
 fn create_renderpass() -> RenderPassDesc {
@@ -117,11 +99,24 @@ fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
             name: Some(Cow::Borrowed("f_color")),
         }])
     };
-    let descriptor_set_descs = vec![create_descriptor_set_desc()];
     let vs_entry = unsafe {
         vs.graphics_entry_point(
             &cstring,
-            descriptor_set_descs.clone(),
+            [(
+                (0, 0),
+                DescriptorRequirements {
+                    descriptor_types: vec![DescriptorType::UniformBuffer],
+                    descriptor_count: 1,
+                    format: None,
+                    image_view_type: None,
+                    multisampled: false,
+                    mutable: false,
+                    stages: ShaderStages {
+                        vertex: true,
+                        ..ShaderStages::none()
+                    },
+                },
+            )],
             None,
             empty_spec_constant,
             vs_in,
@@ -132,7 +127,7 @@ fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
     let fs_entry = unsafe {
         fs.graphics_entry_point(
             &cstring,
-            descriptor_set_descs,
+            [],
             None,
             empty_spec_constant,
             vs_out,
