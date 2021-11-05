@@ -7,13 +7,12 @@ use vulkano::swapchain::{AcquireError, Swapchain, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::EventLoop;
-use winit::window::WindowBuilder;
 
 use egui_vulkano_backend::EguiVulkanoBackend;
 
 use crate::renderer::TeapotRenderer;
+use egui_winit::winit;
+use egui_winit::winit::event::{Event, WindowEvent};
 use egui_winit::winit::event_loop::EventLoop;
 use egui_winit::winit::window::WindowBuilder;
 use once_cell::sync::OnceCell;
@@ -98,7 +97,7 @@ fn main() {
     //init egui
     // create relation between TextureID and render target
     let (texture_id, mut render_target) = egui
-        .painter_mut()
+        .painter
         .init_vulkano_image_with_dimensions([1280, 720])
         .unwrap();
     let size = surface.window().inner_size();
@@ -115,35 +114,33 @@ fn main() {
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             // Begin to draw the UI frame.
-
-            egui.begin_frame();
-
-            egui::CentralPanel::default().show(egui.ctx(), |ui| {
-                ui.vertical(|ui| {
-                    ui.image(texture_id, image_size);
-                    ui.horizontal(|ui| {
-                        //add Model view adjuster
-                        if ui
-                            .add(egui::widgets::Slider::new(&mut height_percent, 0.1..=0.9))
-                            .changed()
-                        {
-                            needs_to_resize_teapot_rt = true;
-                        }
-                        //add rotation control
-                        if ui
-                            .add(egui::Slider::new(
-                                &mut rotate,
-                                -std::f32::consts::PI..=std::f32::consts::PI,
-                            ))
-                            .changed()
-                        {
-                            teapot_renderer.set_rotate(rotate)
-                        }
-                    });
-                })
+            let (needs_repaint, shapes) = egui.run(surface.window(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.image(texture_id, image_size);
+                        ui.horizontal(|ui| {
+                            //add Model view adjuster
+                            if ui
+                                .add(egui::widgets::Slider::new(&mut height_percent, 0.1..=0.9))
+                                .changed()
+                            {
+                                needs_to_resize_teapot_rt = true;
+                            }
+                            //add rotation control
+                            if ui
+                                .add(egui::Slider::new(
+                                    &mut rotate,
+                                    -std::f32::consts::PI..=std::f32::consts::PI,
+                                ))
+                                .changed()
+                            {
+                                teapot_renderer.set_rotate(rotate)
+                            }
+                        });
+                    })
+                });
             });
-            // End the UI frame. We could now handle the output and draw the UI with the backend.
-            let (needs_repaint, shapes) = egui.end_frame();
+
             if needs_repaint {
                 surface.window().request_redraw();
                 winit::event_loop::ControlFlow::Poll
@@ -173,7 +170,7 @@ fn main() {
                 let size = surface.window().inner_size();
                 image_size = [size.width as f32, size.height as f32 * height_percent];
                 render_target =
-                    teapot_rt_resize(size.into(), texture_id, height_percent, egui.painter_mut());
+                    teapot_rt_resize(size.into(), texture_id, height_percent, &mut egui.painter);
                 teapot_renderer.set_render_target(render_target.clone());
             }
             teapot_renderer.draw();
@@ -186,7 +183,7 @@ fn main() {
             .unwrap();
 
             egui.paint(image_num, &mut command_buffer_builder, shapes);
-            egui.painter_mut()
+            egui.painter
                 .present_to_screen(command_buffer_builder.build().unwrap(), acquire_future);
         };
 

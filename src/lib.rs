@@ -35,7 +35,7 @@ pub(crate) mod shader;
 pub struct EguiVulkanoBackend {
     egui_winit: egui_winit::State,
     egui_ctx: egui::CtxRef,
-    painter: Painter,
+    pub painter: Painter,
 }
 #[cfg(feature = "winit")]
 impl EguiVulkanoBackend {

@@ -274,10 +274,9 @@ impl Painter {
             command_buffer_builder.bind_vertex_buffers(0, render_resource.vertex_buffer);
             command_buffer_builder.bind_index_buffer(render_resource.index_buffer);
             command_buffer_builder.set_scissor(0, vec![render_resource.scissor]);
-            command_buffer_builder
+            Ok(command_buffer_builder
                 .draw_indexed(indices, 1, 0, 0, 0)
-                .map(|_| {})
-                .map_err(|err| DrawCommandError::DrawIndexed(err))
+                .map(|_| {})?)
         });
 
         {
@@ -294,7 +293,7 @@ impl Painter {
                 .filter_map(|error| error.err())
                 .collect::<Vec<DrawCommandError>>();
             if !results.is_empty() {
-                return Err(results)?;
+                return Err(results.into());
             }
         }
 

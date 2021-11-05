@@ -26,7 +26,7 @@ default_fonts = ["egui/default_fonts"]
 links = ["egui-winit/links"]
 
 # enable code for sabing
-persistence = ["egui-winit/persistence", "egui-winit/epi","egui/persistence", "epi", "epi/file_storage", "epi/persistence",]
+persistence = ["egui-winit/persistence", "egui-winit/epi", "egui/persistence", "epi", "epi/file_storage", "epi/persistence",]
 
 # experimental support for a screen reader
 screen_reader = ["egui-winit/screen_reader"]

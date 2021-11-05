@@ -12,7 +12,7 @@ use vulkano::command_buffer::{
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
-use vulkano::image::{AttachmentImage, ImageLayout, ImageUsage, SampleCount};
+use vulkano::image::{AttachmentImage, ImageAccess, ImageLayout, ImageUsage, SampleCount};
 
 use vulkano::pipeline::shader::{
     DescriptorRequirements, GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry,
@@ -22,8 +22,7 @@ use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
 use vulkano::render_pass::{
-    AttachmentDesc, Framebuffer, FramebufferAbstract, LoadOp, RenderPass, RenderPassDesc, StoreOp,
-    Subpass, SubpassDesc,
+    AttachmentDesc, Framebuffer, LoadOp, RenderPass, RenderPassDesc, StoreOp, Subpass, SubpassDesc,
 };
 use vulkano::sync::GpuFuture;
 
@@ -135,25 +134,21 @@ fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
             GraphicsShaderType::Fragment,
         )
     };
-    let render_pass = Arc::new(RenderPass::new(device.clone(), create_renderpass()).unwrap());
-    Arc::new(
-        GraphicsPipeline::start()
-            .vertex_input(
-                BuffersDefinition::new()
-                    .vertex::<Vertex>()
-                    .vertex::<Normal>(),
-            )
-            .vertex_shader(vs_entry, ())
-            .input_assembly_state(
-                InputAssemblyState::new().topology(PrimitiveTopology::TriangleList),
-            )
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(fs_entry, ())
-            .depth_stencil_state(DepthStencilState::simple_depth_test())
-            .render_pass(Subpass::from(render_pass, 0).unwrap())
-            .build(device)
-            .unwrap(),
-    )
+    let render_pass = RenderPass::new(device.clone(), create_renderpass()).unwrap();
+    GraphicsPipeline::start()
+        .vertex_input(
+            BuffersDefinition::new()
+                .vertex::<Vertex>()
+                .vertex::<Normal>(),
+        )
+        .vertex_shader(vs_entry, ())
+        .input_assembly_state(InputAssemblyState::new().topology(PrimitiveTopology::TriangleList))
+        .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+        .fragment_shader(fs_entry, ())
+        .depth_stencil_state(DepthStencilState::simple_depth_test())
+        .render_pass(Subpass::from(render_pass, 0).unwrap())
+        .build(device)
+        .unwrap()
 }
 
 //Renderer
@@ -165,7 +160,7 @@ pub struct TeapotRenderer {
     normal_buffer: Arc<CpuAccessibleBuffer<[Normal]>>,
     pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
-    frame_buffer: Option<Arc<dyn FramebufferAbstract>>,
+    frame_buffer: Option<Arc<Framebuffer>>,
     uniform_uploading_buffer_pool: CpuBufferPool<Uniforms>,
     rotate: f32,
     aspect_ratio: f32,
@@ -223,23 +218,21 @@ impl TeapotRenderer {
         //create depth
         let depth = AttachmentImage::with_usage(
             self.device.clone(),
-            [rt.dimensions()[0], rt.dimensions()[1]],
+            [rt.dimensions().width(), rt.dimensions().height()],
             Format::D32_SFLOAT,
             ImageUsage::depth_stencil_attachment(),
         )
         .unwrap();
         //create framebuffer
-        let frame_buffer = Arc::new(
-            Framebuffer::start(self.render_pass.clone())
-                .add(ImageView::new(rt.clone()).unwrap())
-                .unwrap()
-                .add(ImageView::new(depth).unwrap())
-                .unwrap()
-                .build()
-                .unwrap(),
-        ) as Arc<dyn FramebufferAbstract>;
+        let frame_buffer = Framebuffer::start(self.render_pass.clone())
+            .add(ImageView::new(rt.clone()).unwrap())
+            .unwrap()
+            .add(ImageView::new(depth).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
         self.frame_buffer.replace(frame_buffer);
-        self.aspect_ratio = rt.dimensions()[0] as f32 / rt.dimensions()[1] as f32;
+        self.aspect_ratio = rt.dimensions().width() as f32 / rt.dimensions().height() as f32;
     }
     pub fn draw(&mut self) {
         if let Some(frame_buffer) = self.frame_buffer.as_ref() {
@@ -267,10 +260,10 @@ impl TeapotRenderer {
             let layout = self.pipeline.layout().descriptor_set_layouts()[0].clone();
             let mut desc_set_builder = PersistentDescriptorSet::start(layout);
             desc_set_builder
-                .add_buffer(Arc::new(uniform_buffer_sub_buffer))
+                .add_buffer(uniform_buffer_sub_buffer)
                 .unwrap();
 
-            let set = Arc::new(desc_set_builder.build().unwrap());
+            let set = desc_set_builder.build().unwrap();
             let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
                 self.device.clone(),
                 self.queue.family(),
