@@ -7,16 +7,19 @@ use epi::egui;
 use epi::egui::{ClippedMesh, Color32, Texture, TextureId};
 
 use crate::{RenderTarget, ScreenDescriptor};
-use log::{debug, info, warn};
+use log::{info, warn};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
 use vulkano::buffer::{BufferUsage, CpuBufferPool, TypedBufferAccess};
 use vulkano::command_buffer::pool::standard::StandardCommandPoolAlloc;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents,
+    AutoCommandBufferBuilder, AutoCommandBufferBuilderContextError, DrawIndexedError,
+    PrimaryAutoCommandBuffer, SubpassContents,
 };
 use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
-use vulkano::descriptor_set::{DescriptorBindingResources, DescriptorSet, DescriptorSetError};
+use vulkano::descriptor_set::{
+    DescriptorBindingResources, DescriptorSet, DescriptorSetError, DescriptorSetWithOffsets,
+};
 use vulkano::device::{Device, Queue};
 use vulkano::image::view::{ImageView, ImageViewAbstract, ImageViewCreationError};
 use vulkano::image::{
@@ -27,7 +30,7 @@ use vulkano::memory::DeviceMemoryAllocError;
 use vulkano::pipeline::vertex::{VertexMemberInfo, VertexMemberTy};
 use vulkano::pipeline::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
-use vulkano::render_pass::{Framebuffer, FramebufferAbstract};
+use vulkano::render_pass::{Framebuffer, FramebufferCreationError};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;
 
@@ -71,8 +74,8 @@ unsafe impl vulkano::pipeline::vertex::Vertex for WrappedEguiVertex {
 }
 
 struct RenderResource {
-    index_buffer: CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>,
-    vertex_buffer: CpuBufferPoolChunk<WrappedEguiVertex, Arc<StdMemoryPool>>,
+    index_buffer: Arc<CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>>,
+    vertex_buffer: Arc<CpuBufferPoolChunk<WrappedEguiVertex, Arc<StdMemoryPool>>>,
     texture_id: TextureId,
     scissor: vulkano::pipeline::viewport::Scissor,
     job_id: usize,
@@ -84,7 +87,7 @@ pub struct Painter {
     egui_textures: HashMap<TextureId, TextureDescriptor>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    pub(crate) frame_buffers: Vec<Arc<dyn FramebufferAbstract>>,
+    pub(crate) frame_buffers: Vec<Arc<Framebuffer>>,
     vertex_buffer_pool: CpuBufferPool<WrappedEguiVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
     image_staging_buffer: CpuBufferPool<u8>,
@@ -130,12 +133,11 @@ impl Painter {
             .iter()
             .map(|image| {
                 let view = ImageView::new(image.clone()).unwrap();
-                let fb = Framebuffer::start(self.pipeline.subpass().render_pass().clone())
+                Framebuffer::start(self.pipeline.subpass().render_pass().clone())
                     .add(view)
                     .unwrap()
                     .build()
-                    .unwrap();
-                Arc::new(fb) as Arc<dyn FramebufferAbstract>
+                    .unwrap()
             })
             .collect();
     }
@@ -165,19 +167,13 @@ impl Painter {
         render_target: RenderTarget,
         paint_jobs: Vec<ClippedMesh>,
         screen_descriptor: &ScreenDescriptor,
-    ) {
+    ) -> Result<(), CreateCommandBufferErrors> {
         let framebuffer = match render_target {
             RenderTarget::ColorAttachment(color_attachment) => {
                 let fbb = Framebuffer::start(self.pipeline.subpass().render_pass().clone())
                     .add(color_attachment)
                     .unwrap();
-                let fb = if let Ok(fb) = fbb.build() {
-                    fb
-                } else {
-                    debug!("failed to create frame buffer");
-                    return;
-                };
-                Arc::new(fb)
+                fbb.build()?
             }
             RenderTarget::FrameBufferIndex(id) => self.frame_buffers[id].clone(),
         };
@@ -250,14 +246,12 @@ impl Painter {
             .filter_map(|resource| resource)
             .collect();
 
-        let draw = |render_resource: RenderResource| {
+        let draw = Box::new(|render_resource: RenderResource| {
             let texture_id = render_resource.texture_id;
-            let texture = self.get_descriptor_set(texture_id);
-            let texture = match texture {
+            let texture = match self.get_descriptor_set(texture_id) {
                 Ok(texture) => texture,
                 Err(err) => {
-                    warn!("texture error {:?}", err);
-                    return;
+                    return Err(DrawCommandError::GetDescriptor(err));
                 }
             };
             let marker = match texture_id {
@@ -275,15 +269,16 @@ impl Painter {
                 PipelineBindPoint::Graphics,
                 self.pipeline.layout().clone(),
                 0,
-                texture.0,
+                DescriptorSetWithOffsets::new(texture.0, []),
             );
             command_buffer_builder.bind_vertex_buffers(0, render_resource.vertex_buffer);
             command_buffer_builder.bind_index_buffer(render_resource.index_buffer);
             command_buffer_builder.set_scissor(0, vec![render_resource.scissor]);
             command_buffer_builder
                 .draw_indexed(indices, 1, 0, 0, 0)
-                .unwrap();
-        };
+                .map(|_| {})
+                .map_err(|err| DrawCommandError::DrawIndexed(err))
+        });
 
         {
             /*
@@ -293,11 +288,18 @@ impl Painter {
             info!("upload finished in {:?}", instant.elapsed());
             info!("Fusion {} meshes", job_count);
             jobs.sort_by_key(|render_resource| render_resource.job_id);
-            jobs.into_iter().for_each(draw);
+            let results = jobs
+                .into_iter()
+                .map(draw)
+                .filter_map(|error| error.err())
+                .collect::<Vec<DrawCommandError>>();
+            if !results.is_empty() {
+                return Err(results)?;
+            }
         }
 
         info!("end frame");
-        command_buffer_builder.end_render_pass().unwrap();
+        Ok(command_buffer_builder.end_render_pass().map(|_| {})?)
     }
     /// Update egui system texture
     /// You must call before every  create_command_buffer when drawing content changed
@@ -345,7 +347,7 @@ impl Painter {
         let mut desc_set_builder =
             PersistentDescriptorSet::start(pipeline.layout().descriptor_set_layouts()[0].clone());
         desc_set_builder.add_image(image_view)?;
-        Ok(Arc::new(desc_set_builder.build()?))
+        Ok(desc_set_builder.build()?)
     }
     #[inline(always)]
     fn get_descriptor_set(
@@ -699,5 +701,43 @@ impl From<ImageCreationError> for SetTextureErrors {
 impl From<DeviceMemoryAllocError> for SetTextureErrors {
     fn from(err: DeviceMemoryAllocError) -> Self {
         Self::DeviceMemoryAlloc(err)
+    }
+}
+#[derive(Debug)]
+pub enum DrawCommandError {
+    DrawIndexed(DrawIndexedError),
+    GetDescriptor(GetDescriptorErrors),
+}
+impl From<GetDescriptorErrors> for DrawCommandError {
+    fn from(err: GetDescriptorErrors) -> Self {
+        Self::GetDescriptor(err)
+    }
+}
+
+impl From<DrawIndexedError> for DrawCommandError {
+    fn from(err: DrawIndexedError) -> Self {
+        Self::DrawIndexed(err)
+    }
+}
+#[derive(Debug)]
+pub enum CreateCommandBufferErrors {
+    FramebufferCreation(FramebufferCreationError),
+    DrawCommandErrors(Vec<DrawCommandError>),
+    BuilderContextError(AutoCommandBufferBuilderContextError),
+}
+
+impl From<FramebufferCreationError> for CreateCommandBufferErrors {
+    fn from(err: FramebufferCreationError) -> Self {
+        Self::FramebufferCreation(err)
+    }
+}
+impl From<Vec<DrawCommandError>> for CreateCommandBufferErrors {
+    fn from(errors: Vec<DrawCommandError>) -> Self {
+        Self::DrawCommandErrors(errors)
+    }
+}
+impl From<AutoCommandBufferBuilderContextError> for CreateCommandBufferErrors {
+    fn from(err: AutoCommandBufferBuilderContextError) -> Self {
+        Self::BuilderContextError(err)
     }
 }

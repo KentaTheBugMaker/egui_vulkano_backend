@@ -155,15 +155,13 @@ pub(crate) fn create_pipeline(
             GraphicsShaderType::Fragment,
         )
     };
-    let render_pass = Arc::new(
-        RenderPass::new(
-            device.clone(),
-            render_pass_desc_from_format(render_target_format),
-        )
-        .unwrap(),
-    );
+    let render_pass = RenderPass::new(
+        device.clone(),
+        render_pass_desc_from_format(render_target_format),
+    )
+    .unwrap();
     debug!("renderpass created");
-    let pipeline = Arc::new({
+    let pipeline = {
         vulkano::pipeline::GraphicsPipeline::start()
             .viewport_state(ViewportState::viewport_dynamic_scissor_dynamic(1))
             .render_pass(Subpass::from(render_pass, 0).unwrap())
@@ -205,7 +203,7 @@ pub(crate) fn create_pipeline(
                 x[0].set_immutable_samplers(0, [sampler]);
             })
             .unwrap()
-    });
+    };
     debug!("pipeline created");
     pipeline
 }

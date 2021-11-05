@@ -14,6 +14,8 @@ use winit::window::WindowBuilder;
 use egui_vulkano_backend::EguiVulkanoBackend;
 
 use crate::renderer::TeapotRenderer;
+use egui_winit::winit::event_loop::EventLoop;
+use egui_winit::winit::window::WindowBuilder;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};

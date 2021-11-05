@@ -10,21 +10,43 @@ repository = "https://github.com/t18b219k/egui_vulkano_backend"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [features]
-backend_debug = []
+
+# enable cut/copy/paste to OS clipboard.
+# if disabled a clipboard will be simulated so you can still copy/paste within the egui app.
+clipboard = ["egui-winit/clipboard"]
+default = ["clipboard", "default_fonts", "epi", "links", "persistence", "winit"]
+
+# If set, egui will use `include_bytes!` to bundle some fonts.
+# If you plan on specifying your own fonts you may disable this feature.
+default_fonts = ["egui/default_fonts"]
+
+# enable opening links in a browser when an egui hyperlink is clicked.
+links = ["egui-winit/links"]
+
+# enable code for sabing
+persistence = ["egui-winit/persistence", "egui/persistence", "epi", "epi/file_storage", "epi/persistence",
+]
+
+# experimental support for a screen reader
+screen_reader = ["egui-winit/screen_reader"]
+
+winit =["egui-winit", "vulkano-win", "once_cell"]
 [dependencies]
 bytemuck = "1"
-egui ={ git = "https://github.com/emilk/egui.git", branch = "master", features = ["convert_bytemuck"] }
-egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master" }
+egui ={ git = "https://github.com/emilk/egui.git", branch = "master", default_features = false, features = ["convert_bytemuck"] }
+egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master", optional = true }
 env_logger = "0.9"
-epi = { git = "https://github.com/emilk/egui.git", branch = "master" }
+epi = { git = "https://github.com/emilk/egui.git", branch = "master", optional = true }
 log = "0.4"
+once_cell = { version = "1.8", optional = true }
 rayon ="1"
 vulkano = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
-winit = "0.25"
+vulkano-win = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master", optional = true }
 [dev-dependencies]
 cgmath = "0.18"
 chrono = "0.4"
-egui_demo_lib = { git = "https://github.com/emilk/egui.git", branch = "master", features = ["syntect","ehttp","http","syntax_highlighting"] }
-once_cell = "1.8"
-vulkano-win = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
+egui_demo_lib = { git = "https://github.com/emilk/egui.git", branch = "master", features = ["syntect","ehttp","http","syntax_highlighting","persistence"] }
+
+

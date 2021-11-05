@@ -16,25 +16,28 @@ use egui::TextureId;
 use vulkano::device::{Device, Queue};
 
 use vulkano::image::{ImageAccess, ImageViewAbstract};
-use vulkano::render_pass::FramebufferAbstract;
 
 use crate::painter::Painter;
 
+use egui_winit::winit;
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
 use vulkano::swapchain::Surface;
 
+#[cfg(feature = "winit")]
+pub mod eframe;
 pub mod painter;
 pub(crate) mod render_pass;
 pub(crate) mod shader;
 
 /// Glium backend like
+#[cfg(feature = "winit")]
 pub struct EguiVulkanoBackend {
     egui_winit: egui_winit::State,
     egui_ctx: egui::CtxRef,
     painter: Painter,
-    surface: Arc<Surface<winit::window::Window>>,
 }
+#[cfg(feature = "winit")]
 impl EguiVulkanoBackend {
     pub fn new(
         surface: Arc<Surface<winit::window::Window>>,
@@ -46,34 +49,16 @@ impl EguiVulkanoBackend {
             egui_ctx: Default::default(),
             egui_winit: egui_winit::State::new(surface.window()),
             painter: crate::painter::Painter::new(device, queue, render_target_format),
-            surface,
         }
     }
-    pub fn request_redraw(&self) {
-        self.surface.window().request_redraw();
-    }
-    pub fn ctx(&self) -> &egui::CtxRef {
-        &self.egui_ctx
-    }
-
-    pub fn painter_mut(&mut self) -> &mut crate::Painter {
-        &mut self.painter
-    }
-
-    pub fn ctx_and_painter_mut(&mut self) -> (&egui::CtxRef, &mut crate::Painter) {
-        (&self.egui_ctx, &mut self.painter)
-    }
-
-    pub fn pixels_per_point(&self) -> f32 {
-        self.egui_winit.pixels_per_point()
-    }
-
-    pub fn egui_input(&self) -> &egui::RawInput {
-        self.egui_winit.egui_input()
-    }
-
-    pub fn on_event(&mut self, event: &winit::event::WindowEvent<'_>) {
-        self.egui_winit.on_event(self.egui_ctx.as_ref(), event);
+    /// Returns `true` if egui wants exclusive use of this event
+    /// (e.g. a mouse click on an egui window, or entering text into a text field).
+    /// For instance, if you use egui for a game, you want to first call this
+    /// and only when this returns `false` pass on the events to your game.
+    ///
+    /// Note that egui uses `tab` to move focus between elements, so this will always return `true` for tabs.
+    pub fn on_event(&mut self, event: &winit::event::WindowEvent<'_>) -> bool {
+        self.egui_winit.on_event(&self.egui_ctx, event)
     }
 
     /// Is this a close event or a Cmd-Q/Alt-F4 keyboard command?
@@ -81,31 +66,18 @@ impl EguiVulkanoBackend {
         self.egui_winit.is_quit_event(event)
     }
 
-    pub fn begin_frame(&mut self) {
-        let raw_input = self.take_raw_input();
-        self.begin_frame_with_input(raw_input);
-    }
-
-    pub fn begin_frame_with_input(&mut self, raw_input: egui::RawInput) {
-        self.egui_ctx.begin_frame(raw_input);
-    }
-
-    /// Prepare for a new frame. Normally you would call [`Self::begin_frame`] instead.
-    pub fn take_raw_input(&mut self) -> egui::RawInput {
-        self.egui_winit.take_egui_input(self.surface.window())
-    }
-
     /// Returns `needs_repaint` and shapes to draw.
-    pub fn end_frame(&mut self) -> (bool, Vec<egui::epaint::ClippedShape>) {
-        let (egui_output, shapes) = self.egui_ctx.end_frame();
+    pub fn run(
+        &mut self,
+        window: &winit::window::Window,
+        run_ui: impl FnMut(&egui::CtxRef),
+    ) -> (bool, Vec<egui::epaint::ClippedShape>) {
+        let raw_input = self.egui_winit.take_egui_input(window);
+        let (egui_output, shapes) = self.egui_ctx.run(raw_input, run_ui);
         let needs_repaint = egui_output.needs_repaint;
-        self.handle_output(egui_output);
-        (needs_repaint, shapes)
-    }
-
-    pub fn handle_output(&mut self, output: egui::Output) {
         self.egui_winit
-            .handle_output(self.surface.window(), &self.egui_ctx, output);
+            .handle_output(window, &self.egui_ctx, egui_output);
+        (needs_repaint, shapes)
     }
 
     pub fn paint(
@@ -132,13 +104,11 @@ impl EguiVulkanoBackend {
             }
         };
         let target = RenderTarget::FrameBufferIndex(image_number);
-        self.painter.create_command_buffer(
-            command_buffer_builder,
-            target,
-            clipped_meshes,
-            &screen_desc,
-        );
+        self.painter
+            .create_command_buffer(command_buffer_builder, target, clipped_meshes, &screen_desc)
+            .unwrap();
     }
+
     /// I extended to any image to write compiz sample
     ///
     pub fn create_frame_buffers<I: ImageAccess + 'static>(&mut self, swap_chain_images: &[Arc<I>]) {
