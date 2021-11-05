@@ -1,5 +1,21 @@
 use crate::*;
+use std::sync::Arc;
 
+use vulkano::device::{Device, DeviceExtensions};
+use vulkano::image::{ImageUsage, SwapchainImage};
+use vulkano::instance::Instance;
+use vulkano::swapchain::{AcquireError, Swapchain, SwapchainAcquireFuture, SwapchainCreationError};
+use vulkano::sync::GpuFuture;
+use vulkano::{swapchain, Version};
+use vulkano_win::VkSurfaceBuild;
+use winit::event_loop::EventLoop;
+use winit::window::WindowBuilder;
+
+use epi::{App, IntegrationInfo};
+use once_cell::sync::OnceCell;
+use std::time::Instant;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
+use vulkano::device::physical::{PhysicalDevice, QueueFamily};
 struct RequestRepaintEvent;
 
 struct GlowRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<RequestRepaintEvent>>);
@@ -16,7 +32,10 @@ fn create_display(
 ) -> (
     Arc<Device>,
     Arc<Queue>,
+    QueueFamily,
+    Arc<Surface<winit::window::Window>>,
     Arc<Swapchain<winit::window::Window>>,
+    Vec<Arc<SwapchainImage<winit::window::Window>>>,
 ) {
     // The start of this examples is exactly the same as `triangle`. You should read the
     // `triangle` examples if you haven't done so yet.
@@ -79,42 +98,34 @@ fn create_display(
             .build()
             .unwrap()
     };
-    (device, queue, swapchain)
+    (device, queue, queue_family, surface, swapchain, images)
 }
 
 // ----------------------------------------------------------------------------
 
 use egui_winit::winit;
-use egui_winit::winit::event_loop::EventLoop;
-use egui_winit::winit::window::WindowBuilder;
-pub use epi::NativeOptions;
-use vulkano::device::physical::PhysicalDevice;
-use vulkano::image::ImageUsage;
-use vulkano::instance::Instance;
-use vulkano::swapchain::Swapchain;
-use vulkano::Version;
-
-use once_cell::sync::OnceCell;
-use vulkano_win::VkSurfaceBuild;
+use egui_winit::winit::window::Window;
 
 /// Run an egui app
 
 pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
-    let persistence = epi::Persistence::from_app_name(app.name());
+    let persistence = egui_winit::epi::Persistence::from_app_name(app.name());
     let window_settings = persistence.load_window_settings();
     let window_builder =
-        epi::window_builder(native_options, &window_settings).with_title(app.name());
+        egui_winit::epi::window_builder(native_options, &window_settings).with_title(app.name());
     let event_loop = winit::event_loop::EventLoop::with_user_event();
-    let (device, queue, swapchain) = create_display(window_builder, &event_loop);
+    let (device, queue, queue_family, surface, mut swapchain, mut images) =
+        create_display(window_builder, &event_loop);
 
     let repaint_signal = std::sync::Arc::new(GlowRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),
     )));
 
-    let mut painter = crate::Painter::new(device, queue, swapchain.format());
-    let mut integration = epi::EpiIntegration::new(
+    let mut painter = crate::Painter::new(device.clone(), queue.clone(), swapchain.format());
+    painter.create_frame_buffers(&images);
+    let mut integration = egui_winit::epi::EpiIntegration::new(
         "egui_vulkano_backend",
-        gl_window.window(),
+        swapchain.surface().window(),
         &mut painter,
         repaint_signal,
         persistence,
@@ -134,40 +145,56 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
 
-            let (needs_repaint, shapes) = integration.update(gl_window.window(), &mut painter);
+            let (needs_repaint, shapes) = integration.update(surface.window(), &mut painter);
             let clipped_meshes = integration.egui_ctx.tessellate(shapes);
 
             {
+                let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
+                previous_frame_end.as_mut().unwrap().cleanup_finished();
+                let (index, future) = match swapchain::acquire_next_image(swapchain.clone(), None) {
+                    Ok((_, true, _)) => return,
+                    Err(AcquireError::OutOfDate) => return,
+                    Ok((index, false, future)) => (index, future),
+                    Err(err) => {
+                        panic!("Unrecoverable error occurred : {}", err)
+                    }
+                };
                 let color = integration.app.clear_color();
-                unsafe {
-                    use glow::HasContext as _;
-                    gl.disable(glow::SCISSOR_TEST);
-                    gl.clear_color(color[0], color[1], color[2], color[3]);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
-                }
-                painter.upload_egui_texture(&gl, &integration.egui_ctx.texture());
-                painter.paint_meshes(
-                    gl_window.window().inner_size().into(),
-                    &gl,
-                    integration.egui_ctx.pixels_per_point(),
-                    clipped_meshes,
-                );
+                let mut command_buffer_builder =
+                    vulkano::command_buffer::AutoCommandBufferBuilder::primary(
+                        device.clone(),
+                        device.active_queue_families().next().unwrap(),
+                        CommandBufferUsage::OneTimeSubmit,
+                    )
+                    .unwrap();
 
-                gl_window.swap_buffers().unwrap();
+                painter.request_upload_egui_texture(&integration.egui_ctx.texture());
+                painter.create_command_buffer(
+                    &mut command_buffer_builder,
+                    RenderTarget::FrameBufferIndex(index),
+                    clipped_meshes,
+                    &ScreenDescriptor {
+                        physical_width: surface.window().inner_size().width,
+                        physical_height: surface.window().inner_size().height,
+                        scale_factor: surface.window().scale_factor() as f32,
+                    },
+                );
+                let command_buffer = command_buffer_builder.build().unwrap();
+                painter.present_to_screen(command_buffer, future);
             }
 
             {
                 *control_flow = if integration.should_quit() {
                     winit::event_loop::ControlFlow::Exit
                 } else if needs_repaint {
-                    gl_window.window().request_redraw();
+                    surface.window().request_redraw();
                     winit::event_loop::ControlFlow::Poll
                 } else {
                     winit::event_loop::ControlFlow::Wait
                 };
             }
 
-            integration.maybe_autosave(gl_window.window());
+            integration.maybe_autosave(swapchain.surface().window());
         };
 
         match event {
@@ -183,21 +210,27 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
                 }
 
                 if let winit::event::WindowEvent::Resized(physical_size) = event {
-                    gl_window.resize(physical_size);
+                    let dimensions: [u32; 2] = physical_size.into();
+                    let (new_swapchain, new_images) =
+                        match swapchain.recreate().dimensions(dimensions).build() {
+                            Ok(r) => r,
+                            Err(SwapchainCreationError::UnsupportedDimensions) => return,
+                            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                        };
+                    swapchain = new_swapchain;
+                    painter.create_frame_buffers(&new_images);
                 }
 
                 integration.on_event(&event);
                 if integration.should_quit() {
                     *control_flow = winit::event_loop::ControlFlow::Exit;
                 }
-
-                gl_window.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
             winit::event::Event::LoopDestroyed => {
-                integration.on_exit(gl_window.window());
+                integration.on_exit(surface.window());
             }
             winit::event::Event::UserEvent(RequestRepaintEvent) => {
-                gl_window.window().request_redraw();
+                surface.window().request_redraw();
             }
             _ => (),
         }
