@@ -14,13 +14,13 @@ use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageAccess, ImageLayout, ImageUsage, SampleCount};
 
-use vulkano::pipeline::shader::{
-    DescriptorRequirements, GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry,
+use vulkano::shader::{
+    DescriptorRequirements,  ShaderInterface, ShaderInterfaceEntry,
     ShaderModule, ShaderStages,
 };
 use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Viewport, ViewportState};
-use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
+use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint, Pipeline};
 use vulkano::render_pass::{
     AttachmentDesc, Framebuffer, LoadOp, RenderPass, RenderPassDesc, StoreOp, Subpass, SubpassDesc,
 };
@@ -66,10 +66,9 @@ fn create_renderpass() -> RenderPassDesc {
 }
 
 fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
-    let vs = unsafe { ShaderModule::new(device.clone(), include_bytes!("vert.spv")) }.unwrap();
-    let fs = unsafe { ShaderModule::new(device.clone(), include_bytes!("frag.spv")) }.unwrap();
+    let vs = unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("vert.spv")) }.unwrap();
+    let fs = unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("frag.spv")) }.unwrap();
     let cstring = CString::new("main").unwrap();
-    let empty_spec_constant = &[];
     let vs_in = unsafe {
         ShaderInterface::new_unchecked(vec![
             ShaderInterfaceEntry {
@@ -99,40 +98,10 @@ fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
         }])
     };
     let vs_entry = unsafe {
-        vs.graphics_entry_point(
-            &cstring,
-            [(
-                (0, 0),
-                DescriptorRequirements {
-                    descriptor_types: vec![DescriptorType::UniformBuffer],
-                    descriptor_count: 1,
-                    format: None,
-                    image_view_type: None,
-                    multisampled: false,
-                    mutable: false,
-                    stages: ShaderStages {
-                        vertex: true,
-                        ..ShaderStages::none()
-                    },
-                },
-            )],
-            None,
-            empty_spec_constant,
-            vs_in,
-            vs_out.clone(),
-            GraphicsShaderType::Vertex,
-        )
+        vs.entry_point("main").unwrap()
     };
     let fs_entry = unsafe {
-        fs.graphics_entry_point(
-            &cstring,
-            [],
-            None,
-            empty_spec_constant,
-            vs_out,
-            fs_out,
-            GraphicsShaderType::Fragment,
-        )
+        fs.entry_point("main").unwrap()
     };
     let render_pass = RenderPass::new(device.clone(), create_renderpass()).unwrap();
     GraphicsPipeline::start()

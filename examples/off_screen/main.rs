@@ -213,9 +213,6 @@ fn main() {
             }
 
             winit::event::Event::WindowEvent { event, .. } => {
-                if egui.is_quit_event(&event) {
-                    *control_flow = winit::event_loop::ControlFlow::Exit;
-                }
 
                 egui.on_event(&event);
 

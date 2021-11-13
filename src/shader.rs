@@ -20,13 +20,11 @@ use vulkano::pipeline::color_blend::{
 use vulkano::pipeline::depth_stencil::DepthStencilState;
 use vulkano::pipeline::layout::PipelineLayoutPcRange;
 use vulkano::pipeline::rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState};
-use vulkano::pipeline::shader::{
-    DescriptorRequirements, GraphicsShaderType, ShaderInterface, ShaderInterfaceEntry,
-    ShaderModule, ShaderStages,
-};
+
 use vulkano::pipeline::viewport::ViewportState;
 use vulkano::pipeline::{GraphicsPipeline, StateMode};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
+use vulkano::shader::{ShaderStages,ShaderModule, DescriptorRequirements, ShaderInterfaceEntry, ShaderInterface};
 
 pub(crate) fn create_pipeline(
     device: Arc<Device>,
@@ -48,9 +46,9 @@ pub(crate) fn create_pipeline(
     )
     .expect("failed to create sampler");
     let vs_module =
-        unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
+        unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("shaders/vert.spv")) }.unwrap();
     let fs_module =
-        unsafe { ShaderModule::new(device.clone(), include_bytes!("shaders/frag.spv")) }.unwrap();
+        unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("shaders/frag.spv")) }.unwrap();
     let main = CString::new("main").unwrap();
     /*
     layout(set = 0, binding = 0) uniform sampler2D t_texture;
@@ -69,6 +67,12 @@ pub(crate) fn create_pipeline(
             geometry: false,
             fragment: true,
             compute: false,
+            raygen: false,
+            any_hit: false,
+            closest_hit: false,
+            miss: false,
+            intersection: false,
+            callable: false
         },
     });
     /*
@@ -117,43 +121,14 @@ pub(crate) fn create_pipeline(
         }])
     };
 
-    let spec = &[];
+
     let vs_entry = unsafe {
-        vs_module.graphics_entry_point(
-            &main,
-            [],
-            pc_range,
-            spec,
-            vs_in,
-            vs_out.clone(),
-            GraphicsShaderType::Vertex,
-        )
+        vs_module.entry_point("main").unwrap()
     };
 
     let fs_entry = unsafe {
-        fs_module.graphics_entry_point(
-            &main,
-            [(
-                (0, 0),
-                DescriptorRequirements {
-                    descriptor_types: vec![DescriptorType::CombinedImageSampler],
-                    descriptor_count: 1,
-                    format: None,
-                    image_view_type: Some(ImageViewType::Dim2d),
-                    multisampled: false,
-                    mutable: false,
-                    stages: ShaderStages {
-                        fragment: true,
-                        ..Default::default()
-                    },
-                },
-            )],
-            pc_range,
-            spec,
-            vs_out,
-            fs_out,
-            GraphicsShaderType::Fragment,
-        )
+        fs_module.entry_point("main").unwrap()
+
     };
     let render_pass = RenderPass::new(
         device.clone(),

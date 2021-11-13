@@ -29,7 +29,7 @@ use vulkano::memory::pool::StdMemoryPool;
 use vulkano::memory::DeviceMemoryAllocError;
 use vulkano::pipeline::vertex::{VertexMemberInfo, VertexMemberTy};
 use vulkano::pipeline::viewport::{Scissor, Viewport};
-use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint};
+use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint, Pipeline};
 use vulkano::render_pass::{Framebuffer, FramebufferCreationError};
 use vulkano::swapchain::SwapchainAcquireFuture;
 use vulkano::sync::GpuFuture;

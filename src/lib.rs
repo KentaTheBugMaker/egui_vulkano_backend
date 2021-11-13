@@ -61,11 +61,6 @@ impl EguiVulkanoBackend {
         self.egui_winit.on_event(&self.egui_ctx, event)
     }
 
-    /// Is this a close event or a Cmd-Q/Alt-F4 keyboard command?
-    pub fn is_quit_event(&self, event: &winit::event::WindowEvent<'_>) -> bool {
-        self.egui_winit.is_quit_event(event)
-    }
-
     /// Returns `needs_repaint` and shapes to draw.
     pub fn run(
         &mut self,
