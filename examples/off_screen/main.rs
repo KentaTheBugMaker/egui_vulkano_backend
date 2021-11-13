@@ -111,7 +111,7 @@ fn main() {
     let mut image_size = [size.width as f32, size.height as f32 * height_percent];
     let mut needs_to_resize_teapot_rt = false;
     let mut invalid_dimension_flag = false;
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, _, _control_flow| {
         let mut redraw = || {
             // Begin to draw the UI frame.
             let (needs_repaint, shapes) = egui.run(surface.window(), |ctx| {
@@ -213,7 +213,6 @@ fn main() {
             }
 
             winit::event::Event::WindowEvent { event, .. } => {
-
                 egui.on_event(&event);
 
                 surface.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead

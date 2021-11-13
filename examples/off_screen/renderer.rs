@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::ffi::CString;
 use std::sync::Arc;
 
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
@@ -14,21 +12,18 @@ use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageAccess, ImageLayout, ImageUsage, SampleCount};
 
-use vulkano::shader::{
-    DescriptorRequirements,  ShaderInterface, ShaderInterfaceEntry,
-    ShaderModule, ShaderStages,
-};
 use vulkano::pipeline::vertex::BuffersDefinition;
 use vulkano::pipeline::viewport::{Viewport, ViewportState};
-use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint, Pipeline};
+use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
 use vulkano::render_pass::{
     AttachmentDesc, Framebuffer, LoadOp, RenderPass, RenderPassDesc, StoreOp, Subpass, SubpassDesc,
 };
+use vulkano::shader::ShaderModule;
 use vulkano::sync::GpuFuture;
 
 use crate::model;
 use crate::model::{Normal, Vertex};
-use vulkano::descriptor_set::layout::DescriptorType;
+
 use vulkano::descriptor_set::PersistentDescriptorSet;
 use vulkano::pipeline::depth_stencil::DepthStencilState;
 use vulkano::pipeline::input_assembly::{InputAssemblyState, PrimitiveTopology};
@@ -66,43 +61,12 @@ fn create_renderpass() -> RenderPassDesc {
 }
 
 fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
-    let vs = unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("vert.spv")) }.unwrap();
-    let fs = unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("frag.spv")) }.unwrap();
-    let cstring = CString::new("main").unwrap();
-    let vs_in = unsafe {
-        ShaderInterface::new_unchecked(vec![
-            ShaderInterfaceEntry {
-                location: 0..1,
-                format: Format::R32G32B32_SFLOAT,
-                name: Some(Cow::Borrowed("position")),
-            },
-            ShaderInterfaceEntry {
-                location: 1..2,
-                format: Format::R32G32B32_SFLOAT,
-                name: Some(Cow::Borrowed("normal")),
-            },
-        ])
-    };
-    let vs_out = unsafe {
-        ShaderInterface::new_unchecked(vec![ShaderInterfaceEntry {
-            location: 0..1,
-            format: Format::R32G32B32_SFLOAT,
-            name: Some(Cow::Borrowed("v_normal")),
-        }])
-    };
-    let fs_out = unsafe {
-        ShaderInterface::new_unchecked(vec![ShaderInterfaceEntry {
-            location: 0..1,
-            format: Format::R32G32B32A32_SFLOAT,
-            name: Some(Cow::Borrowed("f_color")),
-        }])
-    };
-    let vs_entry = unsafe {
-        vs.entry_point("main").unwrap()
-    };
-    let fs_entry = unsafe {
-        fs.entry_point("main").unwrap()
-    };
+    let vs =
+        unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("vert.spv")) }.unwrap();
+    let fs =
+        unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("frag.spv")) }.unwrap();
+    let vs_entry = vs.entry_point("main").unwrap();
+    let fs_entry = fs.entry_point("main").unwrap();
     let render_pass = RenderPass::new(device.clone(), create_renderpass()).unwrap();
     GraphicsPipeline::start()
         .vertex_input(
