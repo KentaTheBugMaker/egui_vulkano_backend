@@ -9,10 +9,10 @@ layout(set = 0, binding = 0) uniform sampler2D tex;
 layout(push_constant) uniform UniformBuffer {
     vec2 u_screen_size;
     bool is_egui_system_texture;
-};
+} pc;
 void main() {
     vec4 texture_color=texture(tex,v_tex_coord);
-    if (is_egui_system_texture){
+    if (pc.is_egui_system_texture){
         texture_color= texture_color.rrrr;
     }
     f_color = v_color * texture_color;

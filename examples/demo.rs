@@ -1,6 +1,7 @@
 use epi::NativeOptions;
 
 fn main() {
+    env_logger::init();
     let app = egui_demo_lib::WrapApp::default();
     egui_vulkano_backend::eframe::run(
         Box::new(app),
