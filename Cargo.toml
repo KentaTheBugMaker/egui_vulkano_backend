@@ -31,7 +31,7 @@ persistence = ["egui-winit/persistence", "egui-winit/epi", "egui/persistence", "
 # experimental support for a screen reader
 screen_reader = ["egui-winit/screen_reader"]
 
-winit =["egui-winit", "vulkano-win", "once_cell"]
+winit =["egui-winit", "vulkano-win"]
 [dependencies]
 bytemuck = "1"
 egui ={ git = "https://github.com/emilk/egui.git", branch = "master", default_features = false, features = ["convert_bytemuck"] }
@@ -40,7 +40,6 @@ env_logger = "0.9"
 epi = { git = "https://github.com/emilk/egui.git", branch = "master", optional = true }
 fnv ="1"
 log = "0.4"
-once_cell = { version = "1.8", optional = true }
 rayon ="1"
 vulkano = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
 vulkano-win = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master", optional = true }

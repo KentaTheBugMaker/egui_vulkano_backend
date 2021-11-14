@@ -9,10 +9,8 @@ use vulkano::sync::GpuFuture;
 use vulkano::{swapchain, Version};
 use vulkano_win::VkSurfaceBuild;
 
-use once_cell::sync::OnceCell;
-
 use vulkano::command_buffer::CommandBufferUsage;
-use vulkano::device::physical::{PhysicalDevice, QueueFamily};
+use vulkano::device::physical::PhysicalDevice;
 struct RequestRepaintEvent;
 
 struct VulkanoRepaintSignal(
@@ -24,29 +22,23 @@ impl epi::RepaintSignal for VulkanoRepaintSignal {
         self.0.lock().unwrap().send_event(RequestRepaintEvent).ok();
     }
 }
-struct VulkanoDependents<'x> {
+struct VulkanoDependents {
     device: Arc<Device>,
     queue: Arc<Queue>,
-    queue_family: QueueFamily<'x>,
     surface: Arc<Surface<winit::window::Window>>,
     swap_chain: Arc<Swapchain<winit::window::Window>>,
     images: Vec<Arc<SwapchainImage<winit::window::Window>>>,
 }
-fn create_display<'x>(
+fn create_display(
     window_builder: winit::window::WindowBuilder,
     event_loop: &winit::event_loop::EventLoop<RequestRepaintEvent>,
-) -> VulkanoDependents<'x> {
+) -> VulkanoDependents {
     // The start of this examples is exactly the same as `triangle`. You should read the
     // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
-    static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
-    INSTANCE
-        .set(Instance::new(None, Version::V1_0, &required_extensions, None).unwrap())
-        .unwrap();
-    let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
-        .next()
-        .unwrap();
+    let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
+    let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     println!(
         "Using device: {} (type: {:?})",
         physical.properties().device_name,
@@ -54,7 +46,7 @@ fn create_display<'x>(
     );
 
     let surface = window_builder
-        .build_vk_surface(event_loop, INSTANCE.get().unwrap().clone())
+        .build_vk_surface(event_loop, instance.clone())
         .unwrap();
 
     let queue_family = physical
@@ -98,7 +90,6 @@ fn create_display<'x>(
     VulkanoDependents {
         device,
         queue,
-        queue_family,
         surface,
         swap_chain: swapchain,
         images,
@@ -120,7 +111,6 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
     let VulkanoDependents {
         device,
         queue,
-        queue_family,
         surface,
         mut swap_chain,
         images,
@@ -173,7 +163,7 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
                 let mut command_buffer_builder =
                     vulkano::command_buffer::AutoCommandBufferBuilder::primary(
                         device.clone(),
-                        queue_family,
+                        device.active_queue_families().next().unwrap(),
                         CommandBufferUsage::OneTimeSubmit,
                     )
                     .unwrap();

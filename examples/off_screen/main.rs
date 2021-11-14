@@ -13,9 +13,9 @@ use egui_vulkano_backend::EguiVulkanoBackend;
 use crate::renderer::TeapotRenderer;
 use egui_winit::winit;
 use egui_winit::winit::event::{Event, WindowEvent};
-use egui_winit::winit::event_loop::EventLoop;
+use egui_winit::winit::event_loop::{ControlFlow, EventLoop};
 use egui_winit::winit::window::WindowBuilder;
-use once_cell::sync::OnceCell;
+
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
@@ -28,13 +28,9 @@ fn main() {
     // `triangle` examples if you haven't done so yet.
 
     let required_extensions = vulkano_win::required_extensions();
-    static INSTANCE: OnceCell<Arc<Instance>> = OnceCell::new();
-    INSTANCE
-        .set(Instance::new(None, Version::V1_0, &required_extensions, None).unwrap())
-        .unwrap();
-    let physical = PhysicalDevice::enumerate(INSTANCE.get().unwrap())
-        .next()
-        .unwrap();
+
+    let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
+    let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
     println!(
         "Using device: {} (type: {:?})",
         physical.properties().device_name,
@@ -44,7 +40,7 @@ fn main() {
     let event_loop: EventLoop<()> = EventLoop::with_user_event();
     let surface = WindowBuilder::new()
         .with_title("Egui Vulkano Backend sample")
-        .build_vk_surface(&event_loop, INSTANCE.get().unwrap().clone())
+        .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
     let queue_family = physical
@@ -111,7 +107,7 @@ fn main() {
     let mut image_size = [size.width as f32, size.height as f32 * height_percent];
     let mut needs_to_resize_teapot_rt = false;
     let mut invalid_dimension_flag = false;
-    event_loop.run(move |event, _, _control_flow| {
+    event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             // Begin to draw the UI frame.
             let (needs_repaint, shapes) = egui.run(surface.window(), |ctx| {
@@ -177,7 +173,7 @@ fn main() {
 
             let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
                 device.clone(),
-                queue_family,
+                device.active_queue_families().next().unwrap(),
                 CommandBufferUsage::OneTimeSubmit,
             )
             .unwrap();
@@ -211,13 +207,15 @@ fn main() {
                     invalid_dimension_flag = true;
                 }
             }
-
+            winit::event::Event::WindowEvent { event, .. }
+                if event == WindowEvent::CloseRequested =>
+            {
+                *control_flow = ControlFlow::Exit;
+            }
             winit::event::Event::WindowEvent { event, .. } => {
                 egui.on_event(&event);
-
                 surface.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
-
             _ => (),
         }
     });
