@@ -59,12 +59,11 @@ fn create_renderpass() -> RenderPassDesc {
     };
     RenderPassDesc::new(vec![color, depth], vec![sub_pass_desc], vec![])
 }
-
+static VS_SPV: &[u8] = include_bytes!("vert.spv");
+static FS_SPV: &[u8] = include_bytes!("frag.spv");
 fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
-    let vs =
-        unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("vert.spv")) }.unwrap();
-    let fs =
-        unsafe { ShaderModule::from_bytes(device.clone(), include_bytes!("frag.spv")) }.unwrap();
+    let vs = unsafe { ShaderModule::from_bytes(device.clone(), VS_SPV) }.unwrap();
+    let fs = unsafe { ShaderModule::from_bytes(device.clone(), FS_SPV) }.unwrap();
     let vs_entry = vs.entry_point("main").unwrap();
     let fs_entry = fs.entry_point("main").unwrap();
     let render_pass = RenderPass::new(device.clone(), create_renderpass()).unwrap();

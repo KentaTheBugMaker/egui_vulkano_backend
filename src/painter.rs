@@ -27,8 +27,9 @@ use vulkano::image::{
 };
 use vulkano::memory::pool::StdMemoryPool;
 use vulkano::memory::DeviceMemoryAllocError;
-use vulkano::pipeline::vertex::{VertexMemberInfo, VertexMemberTy};
-use vulkano::pipeline::viewport::{Scissor, Viewport};
+
+use vulkano::pipeline::graphics::vertex_input::{VertexMemberInfo, VertexMemberTy};
+use vulkano::pipeline::graphics::viewport::{Scissor, Viewport};
 use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
 use vulkano::render_pass::{Framebuffer, FramebufferCreationError};
 use vulkano::swapchain::SwapchainAcquireFuture;
@@ -49,7 +50,7 @@ pub(crate) struct PushConstants {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(crate) struct WrappedEguiVertex(epi::egui::epaint::Vertex);
-unsafe impl vulkano::pipeline::vertex::Vertex for WrappedEguiVertex {
+unsafe impl vulkano::pipeline::graphics::vertex_input::Vertex for WrappedEguiVertex {
     fn member(name: &str) -> Option<VertexMemberInfo> {
         let dummy = WrappedEguiVertex(epi::egui::epaint::Vertex::default());
         match name {
@@ -77,7 +78,7 @@ struct RenderResource {
     index_buffer: Arc<CpuBufferPoolChunk<u32, Arc<StdMemoryPool>>>,
     vertex_buffer: Arc<CpuBufferPoolChunk<WrappedEguiVertex, Arc<StdMemoryPool>>>,
     texture_id: TextureId,
-    scissor: vulkano::pipeline::viewport::Scissor,
+    scissor: vulkano::pipeline::graphics::viewport::Scissor,
     job_id: usize,
 }
 /// egui rendering command builder
@@ -583,7 +584,7 @@ used for 0 sized area erasing
 fn calc_scissor(
     clip_rect: egui::emath::Rect,
     screen_desc: ScreenDescriptor,
-) -> Option<vulkano::pipeline::viewport::Scissor> {
+) -> Option<vulkano::pipeline::graphics::viewport::Scissor> {
     let pixels_per_point = screen_desc.scale_factor;
     let width_in_pixels = screen_desc.physical_width;
     let height_in_pixels = screen_desc.physical_height;

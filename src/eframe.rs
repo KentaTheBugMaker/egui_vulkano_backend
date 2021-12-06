@@ -1,5 +1,5 @@
 use crate::*;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::{ImageUsage, SwapchainImage};
@@ -98,10 +98,12 @@ fn create_display(
 
 // ----------------------------------------------------------------------------
 
+use egui::epaint::TessellationOptions;
 use egui_winit::winit;
 
 /// Run an egui app
-
+///
+/// Experimentally we use multi thread tesselation to provide performance boost in some CPU bound scenario.
 pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
     let persistence = egui_winit::epi::Persistence::from_app_name(app.name());
     let window_settings = persistence.load_window_settings();
@@ -130,8 +132,15 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
         persistence,
         app,
     );
-
+    let ctx = integration.egui_ctx.clone();
     let mut is_focused = true;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let sender = Arc::new(Mutex::new(sender));
+    let tess_threads = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .thread_name(|id| format!("egui Tesselation thread {}", id))
+        .build()
+        .unwrap();
 
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
@@ -145,9 +154,25 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
             }
 
             let (needs_repaint, shapes) = integration.update(surface.window(), &mut painter);
-            let clipped_meshes = integration.egui_ctx.tessellate(shapes);
+            //let clipped_meshes = integration.egui_ctx.tessellate(shapes);
+            let sender = sender.clone();
+            let ctx = ctx.clone();
+            let mut tess_options = ctx.memory().options.tessellation_options;
+            tess_options.pixels_per_point =ctx.pixels_per_point();
+            tess_options.aa_size = 1.0/ctx.pixels_per_point();
+            tess_threads.spawn_fifo(move || {
+                sender
+                    .lock()
+                    .unwrap()
+                    .send(egui::epaint::tessellator::tessellate_shapes(
+                        shapes,
+                        tess_options,
+                        [ctx.texture().width, ctx.texture().height],
+                    ))
+                    .unwrap()
+            });
 
-            {
+            if let Ok(clipped_meshes) = receiver.try_recv() {
                 let mut previous_frame_end = Some(vulkano::sync::now(device.clone()).boxed());
                 previous_frame_end.as_mut().unwrap().cleanup_finished();
                 let (index, future) = match swapchain::acquire_next_image(swap_chain.clone(), None)

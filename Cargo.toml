@@ -38,7 +38,6 @@ egui ={ git = "https://github.com/emilk/egui.git", branch = "master", default_fe
 egui-winit = { git = "https://github.com/emilk/egui.git", branch = "master", optional = true }
 env_logger = "0.9"
 epi = { git = "https://github.com/emilk/egui.git", branch = "master", optional = true }
-fnv ="1"
 log = "0.4"
 rayon ="1"
 vulkano = { git = "https://github.com/vulkano-rs/vulkano.git", branch = "master" }
