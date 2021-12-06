@@ -12,8 +12,8 @@ use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageAccess, ImageLayout, ImageUsage, SampleCount};
 
-use vulkano::pipeline::vertex::BuffersDefinition;
-use vulkano::pipeline::viewport::{Viewport, ViewportState};
+use vulkano::pipeline::graphics::vertex_input::BuffersDefinition;
+use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
 use vulkano::render_pass::{
     AttachmentDesc, Framebuffer, LoadOp, RenderPass, RenderPassDesc, StoreOp, Subpass, SubpassDesc,
@@ -25,8 +25,8 @@ use crate::model;
 use crate::model::{Normal, Vertex};
 
 use vulkano::descriptor_set::PersistentDescriptorSet;
-use vulkano::pipeline::depth_stencil::DepthStencilState;
-use vulkano::pipeline::input_assembly::{InputAssemblyState, PrimitiveTopology};
+use vulkano::pipeline::graphics::depth_stencil::DepthStencilState;
+use vulkano::pipeline::graphics::input_assembly::{InputAssemblyState, PrimitiveTopology};
 
 //render pass
 fn create_renderpass() -> RenderPassDesc {
@@ -68,7 +68,7 @@ fn create_pipeline(device: Arc<Device>) -> Arc<GraphicsPipeline> {
     let fs_entry = fs.entry_point("main").unwrap();
     let render_pass = RenderPass::new(device.clone(), create_renderpass()).unwrap();
     GraphicsPipeline::start()
-        .vertex_input(
+        .vertex_input_state(
             BuffersDefinition::new()
                 .vertex::<Vertex>()
                 .vertex::<Normal>(),

@@ -7,7 +7,7 @@ use vulkano::pipeline::graphics::input_assembly::{InputAssemblyState, PrimitiveT
 
 use vulkano::render_pass::{RenderPass, Subpass};
 
-use crate::painter::{PushConstants, WrappedEguiVertex};
+use crate::painter::WrappedEguiVertex;
 use crate::render_pass::render_pass_desc_from_format;
 use log::debug;
 
@@ -21,21 +21,13 @@ use vulkano::pipeline::graphics::rasterization::{
     CullMode, FrontFace, PolygonMode, RasterizationState,
 };
 
-use vulkano::descriptor_set::layout::DescriptorType;
-use vulkano::image::view::ImageViewType;
 use vulkano::pipeline::graphics::viewport::ViewportState;
-use vulkano::pipeline::layout::PipelineLayoutPcRange;
+
 use vulkano::pipeline::{GraphicsPipeline, StateMode};
 use vulkano::sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode};
-use vulkano::shader::{
-    DescriptorRequirements, EntryPointInfo, ShaderExecution, ShaderInterface, ShaderInterfaceEntry,
-    ShaderInterfaceEntryType, ShaderModule, ShaderScalarType, ShaderStages,
-};
-use vulkano::Version;
+use vulkano::shader::ShaderModule;
 
-use vulkano::pipeline::graphics::vertex_input::{
-    BuffersDefinition, VertexInputAttributeDescription, VertexInputState,
-};
+use vulkano::pipeline::graphics::vertex_input::BuffersDefinition;
 
 pub(crate) fn create_pipeline(
     device: Arc<Device>,

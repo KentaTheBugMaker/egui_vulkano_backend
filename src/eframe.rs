@@ -98,7 +98,6 @@ fn create_display(
 
 // ----------------------------------------------------------------------------
 
-use egui::epaint::TessellationOptions;
 use egui_winit::winit;
 
 /// Run an egui app
@@ -158,8 +157,8 @@ pub fn run(app: Box<dyn epi::App>, native_options: &epi::NativeOptions) -> ! {
             let sender = sender.clone();
             let ctx = ctx.clone();
             let mut tess_options = ctx.memory().options.tessellation_options;
-            tess_options.pixels_per_point =ctx.pixels_per_point();
-            tess_options.aa_size = 1.0/ctx.pixels_per_point();
+            tess_options.pixels_per_point = ctx.pixels_per_point();
+            tess_options.aa_size = 1.0 / ctx.pixels_per_point();
             tess_threads.spawn_fifo(move || {
                 sender
                     .lock()
